@@ -13,7 +13,7 @@ from serviceforge.models.overview import summarize_services
 from serviceforge.models.service import Scope, ServiceRecord
 
 
-class OverviewView(Adw.ToolbarView):
+class OverviewView(Gtk.Box):
     """Counts reflect only loaded units in the selected systemd manager."""
 
     def __init__(
@@ -22,7 +22,11 @@ class OverviewView(Adw.ToolbarView):
         inspect_service: Callable[[ServiceRecord], None],
         refresh_services: Callable[[], None],
     ) -> None:
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        toolbar = Adw.ToolbarView()
+        toolbar.set_hexpand(True)
+        toolbar.set_vexpand(True)
+        self.append(toolbar)
         self._inspect_service = inspect_service
 
         header = Adw.HeaderBar()
@@ -34,7 +38,7 @@ class OverviewView(Adw.ToolbarView):
         refresh_button.set_tooltip_text("Refresh loaded services")
         refresh_button.connect("clicked", lambda *_: refresh_services())
         header.pack_end(refresh_button)
-        self.add_top_bar(header)
+        toolbar.add_top_bar(header)
 
         scroller = Gtk.ScrolledWindow()
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
@@ -106,7 +110,7 @@ class OverviewView(Adw.ToolbarView):
         body.append(explanation)
 
         scroller.set_child(body)
-        self.set_content(scroller)
+        toolbar.set_content(scroller)
         self.update(None, scope="system")
 
     def update(

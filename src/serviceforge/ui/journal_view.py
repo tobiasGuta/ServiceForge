@@ -25,11 +25,15 @@ SEVERITIES: tuple[tuple[str, int | None], ...] = (
 )
 
 
-class JournalView(Adw.ToolbarView):
+class JournalView(Gtk.Box):
     """The most recent 200 readable entries for the current boot, no live tail."""
 
     def __init__(self, back_callback) -> None:
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        toolbar = Adw.ToolbarView()
+        toolbar.set_hexpand(True)
+        toolbar.set_vexpand(True)
+        self.append(toolbar)
         self._client = JournalClient()
         self._selected: ServiceRecord | None = None
         self._serial = 0
@@ -50,7 +54,7 @@ class JournalView(Adw.ToolbarView):
         self._refresh.set_tooltip_text("Reload current boot journal history")
         self._refresh.connect("clicked", self._refresh_clicked)
         header.pack_end(self._refresh)
-        self.add_top_bar(header)
+        toolbar.add_top_bar(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         for edge in ("top", "bottom", "start", "end"):
@@ -118,7 +122,7 @@ class JournalView(Adw.ToolbarView):
         note.set_wrap(True)
         note.add_css_class("dim-label")
         content.append(note)
-        self.set_content(content)
+        toolbar.set_content(content)
 
     def open(self, record: ServiceRecord) -> None:
         self._selected = record
