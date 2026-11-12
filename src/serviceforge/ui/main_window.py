@@ -8,6 +8,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GObject, Gtk, Pango  # noqa: E402
 
 from serviceforge.backend.systemd_client import SystemdClient
+from serviceforge.backend.service_actions import ServiceActions
+from serviceforge.models.actions import (
+    ActionOutcome, allowed_actions, confirmation_text,
+)
 from serviceforge.models.details import ServiceDetails
 from serviceforge.models.service import ServiceRecord
 from serviceforge.models.overview import summarize_services
@@ -37,6 +41,10 @@ class MainWindow(Adw.ApplicationWindow):
             default_height=730,
         )
         self._client = SystemdClient()
+        self._actions_client = ServiceActions()
+        self._detail_unit: ServiceDetails | None = None
+        self._action_pending = False
+        self._action_buttons: dict[str, Gtk.Button] = {}
         self._request_id = 0
         self._detail_request_id = 0
         self._current_record: ServiceRecord | None = None
@@ -257,6 +265,32 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_content.set_margin_start(24)
         self._detail_content.set_margin_end(24)
 
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_halign(Gtk.Align.START)
+        for operation, label in (
+            ("start", "Start"),
+            ("stop", "Stop"),
+            ("restart", "Restart"),
+            ("reload", "Reload"),
+        ):
+            button = Gtk.Button(label=label)
+            button.set_sensitive(False)
+            if operation in ("stop", "restart"):
+                button.add_css_class("destructive-action")
+            button.connect(
+                "clicked",
+                lambda _button, requested=operation: self._confirm_action(requested),
+            )
+            self._action_buttons[operation] = button
+            actions.append(button)
+        self._detail_content.append(actions)
+
+        self._action_notice = Gtk.Label(xalign=0)
+        self._action_notice.set_wrap(True)
+        self._action_notice.set_selectable(True)
+        self._action_notice.set_visible(False)
+        self._detail_content.append(self._action_notice)
+
         self._detail_spinner = Gtk.Spinner()
         self._detail_spinner.set_halign(Gtk.Align.START)
         self._detail_spinner.set_visible(False)
@@ -355,6 +389,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_back_clicked(self, *_args: object) -> None:
         self._detail_request_id += 1
         self._current_record = None
+        self._detail_unit = None
+        self._update_action_buttons()
         self._stack.set_visible_child_name("explorer")
 
     def _on_detail_refresh_clicked(self, *_args: object) -> None:
@@ -363,9 +399,103 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _open_inspector(self, record: ServiceRecord) -> None:
         self._current_record = record
+        self._action_notice.set_visible(False)
         self._detail_title.set_text(record.name)
         self._stack.set_visible_child_name("inspector")
         self._load_details(record)
+
+    def _update_action_buttons(self) -> None:
+        record = self._current_record
+        available = (
+            allowed_actions(
+                record,
+                can_reload=self._detail_unit.unit.get("CanReload") is True,
+            )
+            if record is not None and self._detail_unit is not None
+            else set()
+        )
+        for action, button in self._action_buttons.items():
+            button.set_sensitive(
+                action in available and not self._action_pending
+            )
+
+    def _confirm_action(self, action: str) -> None:
+        record = self._current_record
+        if (
+            record is None
+            or self._action_pending
+            or action not in allowed_actions(
+                record,
+                can_reload=(
+                    self._detail_unit is not None
+                    and self._detail_unit.unit.get("CanReload") is True
+                ),
+            )
+        ):
+            return
+        heading = f"{action.capitalize()} {record.name}?"
+        dialog = Adw.AlertDialog(
+            heading=heading,
+            body=confirmation_text(action, record),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("proceed", action.capitalize())
+        dialog.set_close_response("cancel")
+        dialog.set_default_response("cancel")
+        if action in ("stop", "restart"):
+            dialog.set_response_appearance(
+                "proceed", Adw.ResponseAppearance.DESTRUCTIVE
+            )
+
+        def responded(_dialog: Adw.AlertDialog, response: str) -> None:
+            if response == "proceed" and self._current_record == record:
+                self._execute_action(action, record)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+
+    def _execute_action(self, action: str, record: ServiceRecord) -> None:
+        if self._action_pending:
+            return
+        self._action_pending = True
+        self._update_action_buttons()
+        self._action_notice.set_text(
+            f"Requesting {action} for {record.name} through systemd…"
+        )
+        self._action_notice.set_visible(True)
+
+        def completed(outcome: ActionOutcome) -> None:
+            self._action_pending = False
+            if self._current_record == record:
+                if outcome.succeeded:
+                    status = (
+                        f"{action.capitalize()} job finished (done). "
+                        "Refreshing current service information."
+                    )
+                else:
+                    status = (
+                        f"Systemd {action} job finished with result "
+                        f"'{outcome.result}'. Check the service status and logs."
+                    )
+                self._action_notice.set_text(status)
+                self._load_details(record)
+            self._update_action_buttons()
+            self.refresh()
+
+        def failed(message: str) -> None:
+            self._action_pending = False
+            if self._current_record == record:
+                self._action_notice.set_text(
+                    f"{action.capitalize()} was not confirmed: {message}"
+                )
+                self._action_notice.set_visible(True)
+                self._load_details(record)
+            self._update_action_buttons()
+            self.refresh()
+
+        self._actions_client.execute(
+            record.scope, record.name, action, completed, failed
+        )
 
     def _clear_detail_groups(self) -> None:
         child = self._detail_groups.get_first_child()
@@ -376,6 +506,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _load_details(self, record: ServiceRecord) -> None:
         self._detail_request_id += 1
         request_id = self._detail_request_id
+        self._detail_unit = None
+        self._update_action_buttons()
         self._clear_detail_groups()
         self._detail_notice.set_visible(False)
         self._detail_refresh.set_sensitive(False)
@@ -397,6 +529,8 @@ class MainWindow(Adw.ApplicationWindow):
             if not current():
                 return
             finished()
+            self._detail_unit = details
+            self._update_action_buttons()
             self._detail_title.set_text(details.display_name)
             if details.service_warning:
                 self._detail_notice.set_text(
