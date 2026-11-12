@@ -14,6 +14,22 @@ class FakeConnection:
         self.handlers = {}
         self.next_handler = 1
         self.unsubscribe_calls = 0
+        self.closed = False
+        self.close_count = 0
+        self.close_handler = None
+
+    def connect(self, signal, callback):
+        assert signal == "closed"
+        self.close_handler = callback
+        return 41
+
+    def disconnect(self, ident):
+        assert ident == 41
+        self.close_handler = None
+
+    def close(self, *_args):
+        self.closed = True
+        self.close_count += 1
 
     def signal_subscribe(
         self, _sender, interface, member, path, _arg0, _flags, callback, _data,
@@ -85,7 +101,7 @@ def exercise_monitor():
         assert method == "Subscribe"
         success(None)
 
-    with patch.object(SystemdClient, "_connect", side_effect=connect), patch.object(
+    with patch.object(LiveMonitor, "_connect_private", side_effect=connect), patch.object(
         SystemdClient, "_call", side_effect=call
     ), patch.object(
         live_monitor.GLib, "timeout_add",
@@ -161,7 +177,8 @@ def exercise_monitor():
         stale_handler = list(connection.handlers.values())[0][3]
         monitor.stop()
         assert connection.handlers == {}
-        assert connection.unsubscribe_calls == 1
+        assert connection.unsubscribe_calls == 0
+        assert connection.closed and connection.close_count == 1
         assert scheduled_periodic[0] in timers.cancelled
 
         stale_handler(
@@ -184,7 +201,7 @@ def exercise_subscription_failure():
     def subscribe(_conn, method, success, error, **kwargs):
         error("subscriptions not supported")
 
-    with patch.object(SystemdClient, "_connect", side_effect=connect), patch.object(
+    with patch.object(LiveMonitor, "_connect_private", side_effect=connect), patch.object(
         SystemdClient, "_call", side_effect=subscribe
     ), patch.object(
         live_monitor.GLib, "timeout_add_seconds",
@@ -199,6 +216,7 @@ def exercise_subscription_failure():
         )
         monitor.start("system")
         assert not connection.handlers
+        assert connection.closed
         assert "Polling" in statuses[-1]
         fallback_id = next(iter(timers.scheduled))
         assert timers.scheduled[fallback_id][0] == 45000
