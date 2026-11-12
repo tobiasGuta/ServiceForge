@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "serviceforge"
+version = "0.1.0.dev0"
+description = "Native GNOME systemd service administration and diagnostics"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "ServiceForge contributors" }]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: X11 Applications :: GTK",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+]
+# PyGObject, GTK4 and Libadwaita are installed through Fedora packages.
+# The open-source license is not finalized; add license metadata after approval.
+
+[project.scripts]
+serviceforge = "serviceforge.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
