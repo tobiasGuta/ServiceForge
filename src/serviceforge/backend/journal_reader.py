@@ -93,10 +93,11 @@ class JournalClient:
             try:
                 entries = done.result()
             except Exception as exc:
-                # Journal access can fail with EACCES, missing files, or an
-                # unavailable optional Fedora dependency; never elevate.
+                # Preserve the message: Python clears exception variables when
+                # leaving an except block (before GLib calls this callback).
+                message = str(exc)
                 def publish_error() -> bool:
-                    on_error(str(exc))
+                    on_error(message)
                     return GLib.SOURCE_REMOVE
 
                 GLib.idle_add(publish_error)
