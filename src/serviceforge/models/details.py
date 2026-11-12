@@ -105,7 +105,7 @@ class ServiceDetails:
                     ("Last service result", _string(service.get("Result"))),
                     ("Last execution code", _numeric(service.get("ExecMainCode"))),
                     ("Last execution status", _numeric(service.get("ExecMainStatus"))),
-                    ("Control group", _string(unit.get("ControlGroup"))),
+                    ("Control group", _string(service.get("ControlGroup"))),
                 ),
             ),
             (

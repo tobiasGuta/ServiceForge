@@ -4,16 +4,18 @@
 
 > **Status: early read-only prototype.** The first milestone lists *loaded* system and user services using systemd's D-Bus API. It does not start, stop, enable, disable, or otherwise modify services.
 
-## Features in the initial milestone
+## Features in the current read-only milestone
 
-- GTK4 and Libadwaita window, using Fedora's system-provided PyGObject bindings.
-- Asynchronous discovery from the systemd system manager or per-user manager.
-- Search services by unit name, description, or state.
-- Inspect load state, active state, substate, and known unit-file state.
-- Refresh manually; errors are displayed without blocking the GUI.
+- GTK4 and Libadwaita window using Fedora's system-provided PyGObject bindings.
+- Asynchronous discovery of loaded services from the system or user manager.
+- Search, quick filters, clickable column sorting, and manual refresh.
+- Status icons and counts for active, inactive, and failed loaded services.
+- Select a row to open the **Service Inspector**, or click **Inspect**.
+- Read authoritative unit and service properties on demand, including unit-file path, PID, restart policy, execution commands, result, and dependencies.
+- Clear unavailable values and error/partial-result messages.
 - No root GUI, subprocess-based `systemctl` parsing, or privileged helper.
 
-Only **loaded units** appear in this milestone. Installed but unloaded unit files will be added in a later service-discovery improvement. Unit-file state is shown as `Unknown` when it cannot be mapped reliably; it is not guessed as `disabled`.
+Only **loaded units** appear in this milestone. Installed but unloaded unit files will be added in a later service-discovery improvement. The inspector uses `GetUnit` plus `Properties.GetAll` for the Unit and Service interfaces, and it shows partial information when a service-specific interface cannot be read. Unit-file state is shown as `Unknown` when it cannot be mapped reliably; it is not guessed as `disabled`.
 
 ## Run from source on Fedora
 
@@ -46,12 +48,12 @@ Use a regular user account. Do not run the GUI with `sudo`.
 
 ServiceForge is not an elevated process. This milestone is strictly read-only and does not register privileged D-Bus operations. The system manager uses the system bus; the user manager uses the session bus. Error messages may reflect local systemd or D-Bus configuration.
 
-This prototype has not yet been validated on the maintainer's Fedora laptop. GTK/Gio integration testing on supported Fedora releases is required before making compatibility claims.
+The maintainer has confirmed the initial service table loads on Fedora (245 services in a screenshot). The updated inspector, scope switching, filters, sorting, and error-handling paths still require Fedora integration validation.
 
 ## Roadmap
 
-1. Read-only service explorer (current).
-2. Robust installed-unit discovery, inspection, and signal-driven updates.
+1. Read-only service explorer and inspector (current; desktop validation pending).
+2. Robust installed-unit discovery and signal-driven updates.
 3. Authorized service actions using systemd and Polkit.
 4. Journald, dependency, performance, and security inspection.
 5. Tests, accessibility, packaging, and releases.

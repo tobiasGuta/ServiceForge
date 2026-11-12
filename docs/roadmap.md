@@ -10,12 +10,16 @@
 - [ ] Fedora Workstation integration validation
 - [ ] Expand unit-file reconciliation to installed-but-unloaded services
 
-## Phase 2: Accurate inspection
+## Phase 2: Accurate inspection (in progress)
 
-- Service details with optional properties
-- Unit file paths, states, and common relationships
-- Signal-driven updates with limited fallback polling
-- Robust error and permission tests
+- [x] On-demand Unit and Service D-Bus property queries
+- [x] Service Inspector with PID, ExecStart, user, group, unit paths, restart policy, and dependencies
+- [x] Active/inactive/failed status icons, summary counts, quick filters, and sortable columns
+- [x] Pure-Python detail display tests
+- [ ] Fedora desktop integration validation of inspector and filters
+- [ ] Installed-but-unloaded service discovery
+- [ ] Signal-driven updates with limited fallback polling
+- [ ] D-Bus error/permission integration tests
 
 ## Phase 3: Service management
 

@@ -48,6 +48,12 @@ class ServiceDetailsTests(unittest.TestCase):
         self.assertEqual(rows["Configured user"], "Manager default")
         self.assertEqual(rows["Configured group"], "Manager default")
 
+    def test_control_group_comes_from_service_interface(self):
+        rows = self.rows(unit={"ControlGroup": "/wrong/manager"}, service={
+            "ControlGroup": "/system.slice/example.service"
+        })
+        self.assertEqual(rows["Control group"], "/system.slice/example.service")
+
     def test_no_service_interface_does_not_hide_unit_fields(self):
         rows = self.rows(unit={"Id": "example.service", "FragmentPath": "/usr/lib/systemd/system/example.service"})
         self.assertEqual(rows["Unit file"], "/usr/lib/systemd/system/example.service")
