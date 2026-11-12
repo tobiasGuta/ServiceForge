@@ -52,7 +52,10 @@ def run() -> None:
     window._detail_unit = ServiceDetails(
         scope="system",
         requested_name=record.name,
-        unit={"CanReload": True, "CanStart": True, "CanStop": True},
+        unit={
+            "LoadState": "loaded", "ActiveState": "failed",
+            "CanReload": True, "CanStart": True, "CanStop": True,
+        },
         service={},
     )
     window._update_action_buttons()
@@ -73,7 +76,10 @@ def run() -> None:
     window._detail_unit = ServiceDetails(
         scope="system",
         requested_name=active_record.name,
-        unit={"CanReload": True, "CanStart": True, "CanStop": True},
+        unit={
+            "LoadState": "loaded", "ActiveState": "active",
+            "CanReload": True, "CanStart": True, "CanStop": True,
+        },
         service={},
     )
     window._update_action_buttons()
@@ -81,6 +87,22 @@ def run() -> None:
     assert window._action_buttons["restart"].get_sensitive()
     assert window._action_buttons["reload"].get_sensitive()
     assert not window._action_buttons["start"].get_sensitive()
+
+    # Simulate a completed Stop job: the selected list record is stale,
+    # but the latest D-Bus unit properties already say inactive.
+    window._detail_unit = ServiceDetails(
+        scope="system",
+        requested_name=active_record.name,
+        unit={
+            "LoadState": "loaded", "ActiveState": "inactive",
+            "CanStart": True, "CanStop": True, "CanReload": False,
+        },
+        service={},
+    )
+    window._update_action_buttons()
+    assert window._action_buttons["start"].get_sensitive()
+    assert not window._action_buttons["stop"].get_sensitive()
+    assert not window._action_buttons["restart"].get_sensitive()
     window.destroy()
     print("GTK overview, journal and management controls constructed successfully")
 

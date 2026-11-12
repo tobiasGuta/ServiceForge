@@ -1,4 +1,6 @@
-"""Native read-only service explorer and on-demand systemd inspector."""
+"""Native service explorer with read-only diagnostics and confirmed actions."""
+
+from dataclasses import replace
 
 import gi
 
@@ -410,8 +412,25 @@ class MainWindow(Adw.ApplicationWindow):
         if record is None or details is None:
             return set()
         props = details.unit
-        return allowed_actions(
+        # ServiceRecord comes from a prior list snapshot. Inspector properties
+        # are more recent, especially after a Start/Stop/Restart job completes.
+        load_state = props.get("LoadState")
+        active_state = props.get("ActiveState")
+        unit_file_state = props.get("UnitFileState")
+        if not isinstance(load_state, str) or not isinstance(active_state, str):
+            return set()
+        current = replace(
             record,
+            load_state=load_state,
+            active_state=active_state,
+            unit_file_state=(
+                unit_file_state
+                if isinstance(unit_file_state, str) and unit_file_state
+                else record.unit_file_state
+            ),
+        )
+        return allowed_actions(
+            current,
             can_start=props.get("CanStart") is True,
             can_stop=props.get("CanStop") is True,
             can_reload=props.get("CanReload") is True,
