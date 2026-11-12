@@ -21,7 +21,10 @@ from serviceforge.ui.overview_view import OverviewView
 from serviceforge.ui.journal_view import JournalView
 
 
-FILTER_OPTIONS = ("All services", "Active", "Inactive", "Failed", "Enabled", "Masked")
+FILTER_OPTIONS = (
+    "All services", "Loaded", "Unloaded", "Active", "Inactive",
+    "Failed", "Enabled", "Masked",
+)
 
 
 class ServiceItem(GObject.Object):
@@ -100,7 +103,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_start(self._overview_button)
 
         self._refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        self._refresh.set_tooltip_text("Refresh loaded services")
+        self._refresh.set_tooltip_text("Refresh services and unit files")
         header.pack_end(self._refresh)
         toolbar.add_top_bar(header)
 
@@ -314,15 +317,19 @@ class MainWindow(Adw.ApplicationWindow):
     def _match_service(self, item: ServiceItem, *_unused: object) -> bool:
         record = item.record
         choice = self._filter_choice.get_selected()
-        if choice == 1 and record.active_state != "active":
+        if choice == 1 and not record.loaded:
             return False
-        if choice == 2 and record.active_state != "inactive":
+        if choice == 2 and record.loaded:
             return False
-        if choice == 3 and record.active_state != "failed":
+        if choice == 3 and record.active_state != "active":
             return False
-        if choice == 4 and record.unit_file_state not in ("enabled", "enabled-runtime"):
+        if choice == 4 and record.active_state != "inactive":
             return False
-        if choice == 5 and (
+        if choice == 5 and record.active_state != "failed":
+            return False
+        if choice == 6 and record.unit_file_state not in ("enabled", "enabled-runtime"):
+            return False
+        if choice == 7 and (
             record.unit_file_state not in ("masked", "masked-runtime")
             and record.load_state != "masked"
         ):
@@ -576,7 +583,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._detail_notice.set_text(message)
             self._detail_notice.set_visible(True)
 
-        self._client.fetch_details(record.scope, record.name, succeeded, failed)
+        self._client.fetch_details(
+            record.scope, record.name, succeeded, failed,
+            known_unit_file=bool(record.unit_file_path),
+        )
 
     def _update_summary(self, *_args: object) -> None:
         records = [
@@ -584,7 +594,9 @@ class MainWindow(Adw.ApplicationWindow):
         ]
         snapshot = summarize_services(records)
         parts = [
-            f"Showing {self._filtered.get_n_items()} of {snapshot.total} loaded services",
+            f"Showing {self._filtered.get_n_items()} of {len(records)} services",
+            f"{snapshot.total} loaded",
+            f"{len(records) - snapshot.total} unloaded",
             f"{snapshot.active} active",
             f"{snapshot.inactive} inactive",
             f"{snapshot.failed} failed",
@@ -614,7 +626,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._set_idle()
             if warning:
                 self._notice.set_text(
-                    "Loaded services, but startup configuration is unavailable: "
+                    "Loaded services found; installed-unit discovery unavailable: "
                     + warning
                 )
                 self._notice.set_visible(True)

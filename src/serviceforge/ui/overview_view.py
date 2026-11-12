@@ -120,7 +120,7 @@ class OverviewView(Gtk.Box):
         scope: Scope,
     ) -> None:
         manager_name = "System manager" if scope == "system" else "User manager"
-        self._scope_label.set_text(manager_name + " · read-only snapshot")
+        self._scope_label.set_text(manager_name + " · read-only loaded-unit snapshot")
         self._clear_failures()
         if records is None:
             for number in self._numbers.values():

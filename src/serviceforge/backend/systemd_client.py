@@ -1,4 +1,8 @@
-"""Read-only, asynchronous Gio D-Bus integration with systemd managers."""
+"""Asynchronous Gio D-Bus discovery and on-demand unit inspection.
+
+Read-only LoadUnit requests may populate systemd's in-memory unit cache;
+they never start the service or change its enablement state.
+"""
 
 from collections.abc import Callable
 from typing import Any
@@ -104,7 +108,7 @@ class SystemdClient:
         on_success: ListCallback,
         on_error: ErrorCallback,
     ) -> None:
-        """Fetch loaded services and known unit-file states without blocking GTK."""
+        """Fetch loaded units and installed unit files without blocking GTK."""
         def connected(connection: Gio.DBusConnection) -> None:
             def got_units(reply: GLib.Variant) -> None:
                 rows = reply.unpack()[0]
@@ -127,11 +131,14 @@ class SystemdClient:
         name: str,
         on_success: DetailCallback,
         on_error: ErrorCallback,
+        *,
+        known_unit_file: bool = False,
     ) -> None:
-        """Read authoritative Unit and Service properties on demand.
+        """Read Unit and Service properties, including installed-but-unloaded files.
 
-        GetUnit resolves the current object path, avoiding stale paths after
-        service reloads. A missing Service interface is a partial result.
+        GetUnit fails if systemd garbage-collected the unit. When we previously
+        observed a real installed unit-file entry, LoadUnit resolves it from
+        disk without starting the service. Errors are never treated as success.
         """
         if not name.endswith(".service") or "/" in name or not name:
             on_error("Invalid service unit name")
@@ -190,12 +197,47 @@ class SystemdClient:
                     parameters=GLib.Variant("(s)", (UNIT_INTERFACE,)),
                 )
 
-            self._call(
-                connection,
-                "GetUnit",
-                got_path,
-                on_error,
-                parameters=GLib.Variant("(s)", (name,)),
-            )
+            def unit_lookup_failed(message: str) -> None:
+                if "org.freedesktop.systemd1.NoSuchUnit" not in message:
+                    on_error(message)
+                    return
+                if known_unit_file:
+                    # A stopped, unreferenced unit is normally unloaded from
+                    # memory; LoadUnit permits inspection before StartUnit.
+                    self._call(
+                        connection,
+                        "LoadUnit",
+                        got_path,
+                        lambda load_error: on_error(
+                            "This service is no longer available as an installed "
+                            "unit. Refresh the service list. Details: " + load_error
+                        ),
+                        parameters=GLib.Variant("(s)", (name,)),
+                    )
+                else:
+                    on_error(
+                        "This service is no longer loaded. Systemd can unload "
+                        "inactive services automatically after Stop. Refresh "
+                        "the list; installed unit files remain discoverable."
+                    )
+
+            if known_unit_file:
+                # An installed-only list record already tells us GetUnit will
+                # probably fail. Resolve its Unit object directly.
+                self._call(
+                    connection,
+                    "LoadUnit",
+                    got_path,
+                    unit_lookup_failed,
+                    parameters=GLib.Variant("(s)", (name,)),
+                )
+            else:
+                self._call(
+                    connection,
+                    "GetUnit",
+                    got_path,
+                    unit_lookup_failed,
+                    parameters=GLib.Variant("(s)", (name,)),
+                )
 
         self._connect(scope, connected, on_error)
