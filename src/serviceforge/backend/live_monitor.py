@@ -48,6 +48,7 @@ class LiveMonitor:
         self._connection: Gio.DBusConnection | None = None
         self._subscriptions: list[int] = []
         self._subscribed_manager = False
+        self._closed_handler_id: int | None = None
         self._refresh_source: int | None = None
         self._reconcile_source: int | None = None
 
@@ -62,8 +63,13 @@ class LiveMonitor:
 
         def connected(connection: Gio.DBusConnection) -> None:
             if not self._is_current(generation):
+                connection.close(None, None, None)
                 return
             self._connection = connection
+            self._closed_handler_id = connection.connect(
+                "closed",
+                lambda _conn, _remote, _error: self._connection_closed(generation),
+            )
 
             for interface, member, path in (
                 (MANAGER_INTERFACE, "UnitNew", MANAGER_PATH),
@@ -95,7 +101,44 @@ class LiveMonitor:
             if self._is_current(generation):
                 self._start_fallback(generation, message)
 
-        SystemdClient._connect(scope, connected, failed)
+        self._connect_private(scope, connected, failed)
+
+    @staticmethod
+    def _connect_private(
+        scope: Scope,
+        on_success: Callable[[Gio.DBusConnection], None],
+        on_error: Callable[[str], None],
+    ) -> None:
+        """Own a distinct bus peer so action-controller subscriptions are isolated."""
+        bus_type = Gio.BusType.SYSTEM if scope == "system" else Gio.BusType.SESSION
+        try:
+            address = Gio.dbus_address_get_for_bus_sync(bus_type, None)
+        except GLib.Error as exc:
+            on_error(f"Could not resolve {scope} bus address: {exc.message}")
+            return
+
+        flags = (
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+            | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION
+        )
+
+        def ready(_source: object, result: Gio.AsyncResult, _data: object) -> None:
+            try:
+                connection = Gio.DBusConnection.new_for_address_finish(result)
+                # A lost monitoring bus must not terminate the desktop app.
+                connection.set_exit_on_close(False)
+                on_success(connection)
+            except GLib.Error as exc:
+                on_error(f"Could not connect to {scope} manager events: {exc.message}")
+
+        Gio.DBusConnection.new_for_address(
+            address, flags, None, None, ready, None,
+        )
+
+    def _connection_closed(self, generation: int) -> None:
+        if self._is_current(generation):
+            self._remove_subscriptions()
+            self._start_fallback(generation, "monitor bus connection closed")
 
     def stop(self) -> None:
         self._generation += 1
@@ -116,14 +159,15 @@ class LiveMonitor:
         for ident in self._subscriptions:
             connection.signal_unsubscribe(ident)
         self._subscriptions.clear()
-        if self._subscribed_manager:
-            connection.call(
-                BUS_NAME, MANAGER_PATH, MANAGER_INTERFACE, "Unsubscribe",
-                None, None, Gio.DBusCallFlags.NONE,
-                5000, None, None, None,
-            )
-            self._subscribed_manager = False
+        if self._closed_handler_id is not None:
+            connection.disconnect(self._closed_handler_id)
+            self._closed_handler_id = None
+        # Closing our private bus peer also removes Manager.Subscribe state.
+        # Do not Unsubscribe on the process-wide shared bus: runtime actions
+        # maintain their own independent JobRemoved subscriptions there.
+        self._subscribed_manager = False
         self._connection = None
+        connection.close(None, None, None)
 
     def _is_current(self, generation: int) -> bool:
         return self._active and generation == self._generation
