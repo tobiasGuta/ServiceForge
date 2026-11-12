@@ -47,3 +47,27 @@ interface. Unknown values are displayed explicitly.
 List and inspector views use a GTK stack so small GNOME windows remain usable.
 Filter and sort are local transformations of the loaded-unit snapshot; they do
 not introduce additional systemd polling.
+
+## Overview
+
+`models.overview.summarize_services()` counts only `ListUnits` results in
+the currently selected manager. A zero failed count does **not** mean every
+installed service is healthy. The Overview page consumes the same loaded-unit
+snapshot as the service table, including pending/failed/error states.
+
+## Journal reader
+
+`backend.journal_reader.read_journal()` uses `python3-systemd`'s native Reader,
+matching `_SYSTEMD_UNIT` for system services and `_SYSTEMD_USER_UNIT` plus
+`_UID` for the logged-in user's services. It limits results to 200 entries
+from the current boot, and reads backwards from the journal tail before
+reversing for display. Some related unit-manager messages may not have these
+fields, so this is not intended to exactly reproduce every `journalctl -u`
+match. Some service messages are inaccessible under ordinary-user journal
+permissions.
+
+The journal operation runs through a single-worker thread executor. Callbacks
+are delivered via `GLib.idle_add`, and generation counters prevent stale
+results from appearing after changing service/view or refreshing. Search and
+severity filtering are local transformations on the bounded snapshot.
+The copy action exports only text currently displayed and is user-initiated.

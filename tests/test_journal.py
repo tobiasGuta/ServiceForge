@@ -64,6 +64,15 @@ class JournalTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_journal("system", unit, reader_factory=lambda: self.fail("must not open"))
 
+    def test_reader_closes_after_failure(self):
+        class BrokenReader(FakeReader):
+            def get_previous(self):
+                raise PermissionError("not allowed")
+        reader = BrokenReader()
+        with self.assertRaises(PermissionError):
+            read_journal("system", "demo.service", reader_factory=lambda: reader)
+        self.assertTrue(reader.closed)
+
     def test_filters_severity_and_search(self):
         rows = [
             JournalEntry("now", 3, "connection failed"),

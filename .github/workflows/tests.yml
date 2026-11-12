@@ -20,3 +20,21 @@ jobs:
       - name: Pure Python unit tests
         run: python -m unittest discover -s tests -v
       # GTK4/Libadwaita and systemd integration still need a Fedora runner.
+
+  fedora-import:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        fedora: ["44", "45"]
+    container:
+      image: fedora:${{ matrix.fedora }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native Fedora dependencies
+        run: dnf install -y python3 python3-gobject gtk4 libadwaita python3-systemd
+      - name: Import GTK application and journal backend
+        run: |
+          PYTHONPATH=src python3 -c "from serviceforge.ui.main_window import MainWindow; from serviceforge.ui.overview_view import OverviewView; from serviceforge.ui.journal_view import JournalView; from serviceforge.backend.journal_reader import read_journal; print('Native imports OK')"
+      - name: Run pure-Python tests
+        run: python3 -m unittest discover -s tests -v
+      # Headless import smoke test, not an end-to-end GUI test.
