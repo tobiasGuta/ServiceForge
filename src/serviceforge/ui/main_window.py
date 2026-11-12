@@ -11,12 +11,17 @@ from gi.repository import Adw, Gio, GObject, Gtk, Pango  # noqa: E402
 
 from serviceforge.backend.systemd_client import SystemdClient
 from serviceforge.backend.service_actions import ServiceActions
+from serviceforge.backend.unit_file_actions import UnitFileActions
 from serviceforge.models.actions import (
     ActionOutcome, allowed_actions, confirmation_text,
 )
 from serviceforge.models.details import ServiceDetails
 from serviceforge.models.service import ServiceRecord
 from serviceforge.models.overview import summarize_services
+from serviceforge.models.unit_files import (
+    FileActionOutcome, file_action_allowed, file_action_message,
+    requires_typed_confirmation,
+)
 from serviceforge.ui.overview_view import OverviewView
 from serviceforge.ui.journal_view import JournalView
 
@@ -36,7 +41,7 @@ class ServiceItem(GObject.Object):
 
 
 class MainWindow(Adw.ApplicationWindow):
-    """Search, sort, filter, and inspect systemd without changing any services."""
+    """Inspect services and perform explicitly confirmed systemd operations."""
 
     def __init__(self, application: Adw.Application) -> None:
         super().__init__(
@@ -47,9 +52,13 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._client = SystemdClient()
         self._actions_client = ServiceActions()
+        self._file_client = UnitFileActions()
         self._detail_unit: ServiceDetails | None = None
+        self._file_state: str | None = None
+        self._file_state_request_id = 0
         self._action_pending = False
         self._action_buttons: dict[str, Gtk.Button] = {}
+        self._file_buttons: dict[str, Gtk.Button] = {}
         self._request_id = 0
         self._detail_request_id = 0
         self._current_record: ServiceRecord | None = None
@@ -270,6 +279,17 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_content.set_margin_start(24)
         self._detail_content.set_margin_end(24)
 
+        runtime_title = Gtk.Label(label="Runtime controls", xalign=0)
+        runtime_title.add_css_class("title-4")
+        self._detail_content.append(runtime_title)
+        runtime_note = Gtk.Label(
+            label="Changes the service's running state now, not its boot configuration.",
+            xalign=0,
+        )
+        runtime_note.add_css_class("dim-label")
+        runtime_note.set_wrap(True)
+        self._detail_content.append(runtime_note)
+
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_halign(Gtk.Align.START)
         for operation, label in (
@@ -289,6 +309,46 @@ class MainWindow(Adw.ApplicationWindow):
             self._action_buttons[operation] = button
             actions.append(button)
         self._detail_content.append(actions)
+
+        file_title = Gtk.Label(label="Startup configuration", xalign=0)
+        file_title.add_css_class("title-4")
+        self._detail_content.append(file_title)
+        file_note = Gtk.Label(
+            label=(
+                "Persistent unit-file changes across restarts and reboots. "
+                "Enable/Disable do not start/stop; Mask blocks activation."
+            ),
+            xalign=0,
+        )
+        file_note.set_wrap(True)
+        file_note.add_css_class("dim-label")
+        self._detail_content.append(file_note)
+
+        file_actions = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+        )
+        file_actions.set_halign(Gtk.Align.START)
+        for operation, label in (
+            ("enable", "Enable"),
+            ("disable", "Disable"),
+            ("mask", "Mask"),
+            ("unmask", "Unmask"),
+        ):
+            button = Gtk.Button(label=label)
+            button.set_sensitive(False)
+            if operation == "mask":
+                button.add_css_class("destructive-action")
+            button.connect(
+                "clicked",
+                lambda _button, requested=operation: self._confirm_file_action(requested),
+            )
+            self._file_buttons[operation] = button
+            file_actions.append(button)
+        self._detail_content.append(file_actions)
+        self._file_status = Gtk.Label(xalign=0)
+        self._file_status.set_wrap(True)
+        self._file_status.add_css_class("dim-label")
+        self._detail_content.append(self._file_status)
 
         self._action_notice = Gtk.Label(xalign=0)
         self._action_notice.set_wrap(True)
@@ -397,8 +457,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_back_clicked(self, *_args: object) -> None:
         self._detail_request_id += 1
+        self._file_state_request_id += 1
         self._current_record = None
         self._detail_unit = None
+        self._file_state = None
         self._update_action_buttons()
         self._stack.set_visible_child_name("explorer")
 
@@ -445,10 +507,177 @@ class MainWindow(Adw.ApplicationWindow):
             refuse_manual_stop=props.get("RefuseManualStop") is True,
         )
 
+    def _current_active_state(self) -> str | None:
+        if self._detail_unit is None:
+            return None
+        value = self._detail_unit.unit.get("ActiveState")
+        return value if isinstance(value, str) else None
+
+    def _eligible_file_actions(self) -> set[str]:
+        record = self._current_record
+        if record is None:
+            return set()
+        return {
+            action
+            for action in ("enable", "disable", "mask", "unmask")
+            if file_action_allowed(
+                record, action, self._file_state,
+                active_state=self._current_active_state(),
+            )
+        }
+
     def _update_action_buttons(self) -> None:
         available = self._eligible_actions()
         for action, button in self._action_buttons.items():
             button.set_sensitive(action in available and not self._action_pending)
+        file_available = self._eligible_file_actions()
+        for action, button in self._file_buttons.items():
+            button.set_sensitive(
+                action in file_available and not self._action_pending
+            )
+
+    def _load_file_state(self, record: ServiceRecord) -> None:
+        self._file_state_request_id += 1
+        request_id = self._file_state_request_id
+        self._file_state = None
+        self._update_action_buttons()
+        if not record.unit_file_path:
+            self._file_status.set_text(
+                "No matching installed unit-file entry. "
+                "Persistent actions are unavailable."
+            )
+            return
+        self._file_status.set_text("Checking current unit-file state…")
+
+        def current() -> bool:
+            return (
+                request_id == self._file_state_request_id
+                and record == self._current_record
+            )
+
+        def success(state: str) -> None:
+            if not current():
+                return
+            self._file_state = state
+            self._file_status.set_text(
+                f"Current unit-file state: {state}. "
+                "Only supported persistent transitions are offered."
+            )
+            self._update_action_buttons()
+
+        def failure(message: str) -> None:
+            if not current():
+                return
+            self._file_status.set_text(
+                "Cannot verify unit-file configuration. "
+                "Changes are disabled. " + message
+            )
+            self._update_action_buttons()
+
+        self._file_client.get_state(
+            record.scope, record.name, success, failure,
+        )
+
+    def _confirm_file_action(self, action: str) -> None:
+        record = self._current_record
+        state = self._file_state
+        if (
+            record is None
+            or state is None
+            or self._action_pending
+            or action not in self._eligible_file_actions()
+        ):
+            return
+
+        dialog = Adw.AlertDialog(
+            heading=f"{action.capitalize()} {record.name}?",
+            body=file_action_message(action, record),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("apply", action.capitalize())
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        if action in ("disable", "mask"):
+            dialog.set_response_appearance(
+                "apply", Adw.ResponseAppearance.DESTRUCTIVE
+            )
+
+        if requires_typed_confirmation(record, action):
+            entry = Gtk.Entry()
+            entry.set_placeholder_text(f"Type {record.name} to confirm")
+            entry.set_tooltip_text("Type the exact service name to unlock this action")
+            entry.set_hexpand(True)
+            dialog.set_extra_child(entry)
+            dialog.set_response_enabled("apply", False)
+            entry.connect(
+                "changed",
+                lambda widget: dialog.set_response_enabled(
+                    "apply", widget.get_text() == record.name,
+                ),
+            )
+
+        def responded(_dialog: Adw.AlertDialog, response: str) -> None:
+            if (
+                response == "apply"
+                and record == self._current_record
+                and self._file_state == state
+                and action in self._eligible_file_actions()
+                and not self._action_pending
+            ):
+                self._execute_file_action(record, action, state)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+
+    def _execute_file_action(
+        self, record: ServiceRecord, action: str, expected_state: str,
+    ) -> None:
+        if self._action_pending:
+            return
+        self._action_pending = True
+        self._update_action_buttons()
+        self._action_notice.set_text(
+            f"Applying persistent {action} to {record.name} through systemd…"
+        )
+        self._action_notice.set_visible(True)
+        original_active_state = self._current_active_state()
+
+        def success(outcome: FileActionOutcome) -> None:
+            self._action_pending = False
+            if record == self._current_record:
+                if outcome.verified:
+                    notice = (
+                        f"{action.capitalize()} verified: unit-file state is "
+                        f"{outcome.current_state}. "
+                        f"{len(outcome.changes)} file change(s) reported. "
+                        "The service's current running state is unchanged "
+                        "by this operation."
+                    )
+                else:
+                    notice = (
+                        f"Systemd returned from {action}, but reported state "
+                        f"{outcome.current_state!r}. Refresh and verify before "
+                        "trying another change."
+                    )
+                self._action_notice.set_text(notice)
+                self._load_details(record)
+            self._update_action_buttons()
+            self.refresh()
+
+        def error(message: str) -> None:
+            self._action_pending = False
+            if record == self._current_record:
+                self._action_notice.set_text(
+                    f"{action.capitalize()} was not verified: {message}"
+                )
+                self._load_details(record)
+            self._update_action_buttons()
+            self.refresh()
+
+        self._file_client.execute(
+            record, action, expected_state, original_active_state,
+            success, error,
+        )
 
     def _confirm_action(self, action: str) -> None:
         record = self._current_record
@@ -529,6 +758,7 @@ class MainWindow(Adw.ApplicationWindow):
             child = self._detail_groups.get_first_child()
 
     def _load_details(self, record: ServiceRecord) -> None:
+        self._load_file_state(record)
         self._detail_request_id += 1
         request_id = self._detail_request_id
         self._detail_unit = None
@@ -565,16 +795,20 @@ class MainWindow(Adw.ApplicationWindow):
                 self._detail_notice.set_visible(True)
             for group_title, rows in details.sections():
                 group = Adw.PreferencesGroup()
-                group.set_title(group_title)
                 for field_title, value in rows:
                     row = Adw.ActionRow()
                     row.set_title(field_title)
                     row.set_use_markup(False)
                     row.set_subtitle(value)
-                    row.set_subtitle_lines(0)
+                    row.set_subtitle_lines(
+                        2 if group_title == "Identity and state" else 4
+                    )
                     row.set_subtitle_selectable(True)
                     group.add(row)
-                self._detail_groups.append(group)
+                expander = Gtk.Expander(label=group_title)
+                expander.set_expanded(group_title == "Identity and state")
+                expander.set_child(group)
+                self._detail_groups.append(expander)
 
         def failed(message: str) -> None:
             if not current():
