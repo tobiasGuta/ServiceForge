@@ -1,4 +1,4 @@
-"""Service state as reported by systemd, without invented defaults."""
+"""Typed, immutable records for read-only systemd inspection."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -16,6 +16,7 @@ class ServiceRecord:
     active_state: str
     sub_state: str
     unit_file_state: str | None
+    object_path: str | None = None
 
     @property
     def startup_display(self) -> str:

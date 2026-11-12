@@ -1,13 +1,11 @@
-"""Pure functions translating systemd manager replies into service records.
+"""Translate systemd manager replies into strongly typed loaded-service records.
 
-ListUnits rows contain:
-(name, description, load_state, active_state, sub_state, following,
- object_path, job_id, job_type, job_path)
+ListUnits rows: (name, description, load, active, sub, following, object_path,
+                 job_id, job_type, job_path)
+ListUnitFiles rows: (absolute_path, unit_file_state)
 
-ListUnitFiles rows contain (unit_file_path, unit_file_state).
-
-A missing match is unknown, not disabled. This first release intentionally
-shows loaded units only; installed but unloaded units require a separate view.
+ListUnits only returns loaded units. File names may not match instantiated or
+transient services; lack of a matching entry must never be called 'disabled'.
 """
 
 from pathlib import PurePosixPath
@@ -21,7 +19,7 @@ def normalize_services(
     unit_file_rows: Iterable[Sequence[object]],
     scope: Scope,
 ) -> list[ServiceRecord]:
-    """Keep loaded .service units and attach known startup configuration."""
+    """Return loaded .service units with known file states, sorted by name."""
     if scope not in ("system", "user"):
         raise ValueError(f"Unrecognized manager scope: {scope!r}")
 
@@ -31,21 +29,22 @@ def normalize_services(
             raise ValueError("Malformed ListUnitFiles row")
         path, state = row[:2]
         if isinstance(path, str) and isinstance(state, str):
-            unit_name = PurePosixPath(path).name
-            # Prefer the first occurrence rather than arbitrarily overriding
-            # duplicate unit names with a potentially different definition.
-            file_states.setdefault(unit_name, state)
+            file_states.setdefault(PurePosixPath(path).name, state)
 
-    services: list[ServiceRecord] = []
+    records: list[ServiceRecord] = []
     for row in unit_rows:
-        if len(row) < 5:
+        if len(row) < 7:
             raise ValueError("Malformed ListUnits row")
         name, description, load, active, sub = row[:5]
-        if not all(isinstance(value, str) for value in (name, description, load, active, sub)):
+        if not all(
+            isinstance(value, str)
+            for value in (name, description, load, active, sub)
+        ):
             raise ValueError("Unexpected value type in ListUnits row")
         if not name.endswith(".service"):
             continue
-        services.append(
+        path = row[6] if isinstance(row[6], str) else None
+        records.append(
             ServiceRecord(
                 scope=scope,
                 name=name,
@@ -54,7 +53,8 @@ def normalize_services(
                 active_state=active,
                 sub_state=sub,
                 unit_file_state=file_states.get(name),
+                object_path=path,
             )
         )
-    services.sort(key=lambda record: record.name.casefold())
-    return services
+    records.sort(key=lambda record: record.name.casefold())
+    return records
