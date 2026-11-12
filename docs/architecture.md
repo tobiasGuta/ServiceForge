@@ -131,3 +131,25 @@ file state independently of unit property inspection, so Unmask can still
 be offered if a masked unit fails normal unit property inspection. Advanced
 execution and dependency panels are collapsed by default. The UI never
 treats a successful file change as confirmation a service started/stopped.
+
+## Live monitoring (experimental)
+
+`backend.live_monitor.LiveMonitor` creates a **private D-Bus bus peer**
+rather than using `Gio.bus_get()`'s shared process connection. This matters:
+Manager.Subscribe/Unsubscribe are scoped to a client; the private signal watcher
+cannot inadvertently disable the `ServiceActions` job-completion listener.
+Private connections use Gio's asynchronous `new_for_address` API and
+are closed when monitoring is paused, the scope changes, or the app closes.
+
+The monitor subscribes to Manager.UnitNew/UnitRemoved/JobRemoved/
+UnitFilesChanged/Reloading and selected Unit/Service PropertiesChanged
+notifications. Each event triggers a debounced full snapshot read (750 ms),
+never writes to systemd. A periodic 90-second reconciliation compensates for
+missed notifications and disk changes. If subscription fails, the monitor
+falls back to a 45-second snapshot polling interval and tells the user why.
+
+`models.monitoring` normalizes manager signals into a small in-session feed
+(30 events per scope, up to 10 displayed) without claiming these messages
+represent historic journal records or that successful jobs imply continued
+service health. User and system event histories are kept separate.
+Generation identifiers discard late callbacks from old manager connections.

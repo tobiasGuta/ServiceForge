@@ -73,6 +73,7 @@ class OverviewView(Gtk.Box):
         self._numbers: dict[str, Gtk.Label] = {}
         for key, label in (
             ("total", "Loaded services"),
+            ("unloaded", "Installed · unloaded"),
             ("active", "Active"),
             ("inactive", "Inactive"),
             ("failed", "Failed"),
@@ -207,7 +208,11 @@ class OverviewView(Gtk.Box):
 
         summary = summarize_services(records)
         for key in self._numbers:
-            self._numbers[key].set_text(str(getattr(summary, key)))
+            value = (
+                len(records) - summary.total if key == "unloaded"
+                else getattr(summary, key)
+            )
+            self._numbers[key].set_text(str(value))
         if summary.other:
             self._status.set_text(
                 f"{summary.other} loaded services have other states "

@@ -81,3 +81,14 @@ operation is coupled with any file change.
 The policy is not a guarantee of safety; changing startup links can impact
 other services. Follow `docs/unit-file-testing.md` and
 `docs/authorization-testing.md` only on disposable test units.
+
+## Live monitoring (read-only)
+
+ServiceForge uses a dedicated, non-privileged Gio D-Bus connection for
+manager event subscriptions. This isolates signal registration from runtime
+action job tracking. Signals can cause **read-only** service-list refreshes,
+but cannot trigger Start/Stop/Enable/Mask or any other administrative write.
+Event bursts are debounced to reduce load; periodic refresh uses low-frequency
+checks only. Activity history is kept in memory for this application session,
+limited to 30 events per manager. It is not persisted, automatically copied,
+or sent to a network service.

@@ -7,9 +7,9 @@
 - [x] Asynchronous Gio D-Bus service discovery
 - [x] Loaded service table, system/user scope, search, and manual refresh
 - [x] Pure-Python normalization tests
-- [ ] Fedora Workstation integration validation
+- [x] Fedora Workstation initial explorer integration validated in screenshots
 - [x] Reconcile installed unit files with loaded units
-- [ ] Validate unloaded-unit handling on the maintainer's Fedora desktop
+- [x] Unloaded-unit lifecycle handling validated on the maintainer's Fedora desktop
 
 ## Phase 2: Accurate inspection (in progress)
 
@@ -17,9 +17,11 @@
 - [x] Service Inspector with PID, ExecStart, user, group, unit paths, restart policy, and dependencies
 - [x] Active/inactive/failed status icons, summary counts, quick filters, and sortable columns
 - [x] Pure-Python detail display tests
-- [ ] Fedora desktop integration validation of inspector and filters
+- [x] Fedora desktop integration validation of Inspector and filters (screenshots)
 - [x] Installed-but-unloaded service discovery and inspection
-- [ ] Signal-driven updates with limited fallback polling
+- [x] Private D-Bus monitor with debounced events, 90s reconciliation and 45s fallback
+- [x] In-session, bounded Overview activity feed
+- [ ] Manually verify live monitoring, fallback state and pause/scope switching on Fedora GNOME
 - [ ] D-Bus error/permission integration tests
 
 ## Phase 3: Service management (experimental)
@@ -32,8 +34,9 @@
 - [x] Start verified after unloaded user-unit Stop on Fedora
 - [x] Implement persistent Enable/Disable/Mask/Unmask with fresh-state checks and manual confirmations
 - [x] Mock authorization-denied and stale-state behavior in Fedora CI
-- [ ] Manually validate persistent file actions on disposable user test unit
-- [ ] Test system-manager Polkit authorization and denial using disposable system unit
+- [x] User Enable/Disable/Mask/Unmask validated on Fedora test fixture (screenshots)
+- [x] Maintainer reports system-manager authorization tests passed on disposable fixture
+- [ ] Validate additional authorization variants and non-forcing mask edge case ([Issue #4](https://github.com/tobiasGuta/ServiceForge/issues/4))
 - [ ] More comprehensive dependency-impact previews
 
 ## Phase 4: Diagnostics (begun early, read-only)
