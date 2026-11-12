@@ -222,13 +222,17 @@ class SystemdClient:
                     )
 
             if known_unit_file:
-                # An installed-only list record already tells us GetUnit will
-                # probably fail. Resolve its Unit object directly.
+                # Use LoadUnit once to resolve installed and previously
+                # garbage-collected units. Never retry a missing unit here.
                 self._call(
                     connection,
                     "LoadUnit",
                     got_path,
-                    unit_lookup_failed,
+                    lambda message: on_error(
+                        "The service's unit file is no longer available, or "
+                        "systemd could not load it. Refresh the list. Details: "
+                        + message
+                    ),
                     parameters=GLib.Variant("(s)", (name,)),
                 )
             else:
