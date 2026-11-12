@@ -31,10 +31,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install native Fedora dependencies
-        run: dnf install -y python3 python3-gobject gtk4 libadwaita python3-systemd
+        run: dnf install -y python3 python3-gobject gtk4 libadwaita python3-systemd xorg-x11-server-Xvfb
       - name: Import GTK application and journal backend
         run: |
           PYTHONPATH=src python3 -c "from serviceforge.ui.main_window import MainWindow; from serviceforge.ui.overview_view import OverviewView; from serviceforge.ui.journal_view import JournalView; from serviceforge.backend.journal_reader import read_journal; print('Native imports OK')"
+      - name: Construct GTK widgets in a virtual display
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 >/tmp/serviceforge-xvfb.log 2>&1 &
+          sleep 2
+          DISPLAY=:99 GDK_BACKEND=x11 GSK_RENDERER=cairo PYTHONPATH=src python3 tests/gui_smoke.py
       - name: Run pure-Python tests
         run: python3 -m unittest discover -s tests -v
-      # Headless import smoke test, not an end-to-end GUI test.
+      # Headless GTK construction is not a substitute for Fedora desktop integration tests.
