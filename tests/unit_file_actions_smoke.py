@@ -17,10 +17,13 @@ from serviceforge.models.service import ServiceRecord
 NAME = "serviceforge-config-test.service"
 
 
-def record(*, state="disabled", active="inactive"):
+def record(*, state="disabled", active="inactive", scope="user"):
     return ServiceRecord(
-        "user", NAME, "Disposable test", "loaded", active, "dead", state,
-        unit_file_path="/home/test/.local/share/systemd/user/" + NAME,
+        scope, NAME, "Disposable test", "loaded", active, "dead", state,
+        unit_file_path=(
+            "/etc/systemd/system/" + NAME if scope == "system"
+            else "/home/test/.local/share/systemd/user/" + NAME
+        ),
     )
 
 
@@ -36,17 +39,17 @@ def verify_signatures():
         assert variant.unpack() == expected_value
 
 
-def exercise(action, old_state, new_state, *, change_state=True, deny=False):
+def exercise(action, old_state, new_state, *, change_state=True, deny=False, scope="user"):
     actor = UnitFileActions()
     observed = [old_state, new_state]
     errors, outcomes, calls = [], [], []
 
     def fake_get(scope, name, success, failure):
-        assert scope == "user" and name == NAME
+        assert scope in ("user", "system") and name == NAME
         success(observed.pop(0))
 
-    def fake_connect(scope, success, failure):
-        assert scope == "user"
+    def fake_connect(manager_scope, success, failure):
+        assert manager_scope == scope
         success(object())
 
     def fake_call(_conn, method, success, failure, **kwargs):
@@ -71,7 +74,7 @@ def exercise(action, old_state, new_state, *, change_state=True, deny=False):
         SystemdClient, "_connect", side_effect=fake_connect
     ), patch.object(SystemdClient, "_call", side_effect=fake_call):
         actor.execute(
-            record(state=old_state), action, old_state,
+            record(state=old_state, scope=scope), action, old_state,
             "inactive", outcomes.append, errors.append,
         )
 
@@ -135,5 +138,10 @@ if __name__ == "__main__":
     exercise("unmask", "masked", "disabled")
     exercise("enable", "disabled", "disabled")  # Postflight mismatch.
     exercise("enable", "disabled", "enabled", deny=True)
+    # System-manager request: simulate Polkit refusal without changing a unit.
+    exercise(
+        "enable", "disabled", "enabled",
+        deny=True, scope="system",
+    )
     changed_before_write()
     print("Mocked unit-file signatures, authorization and state checks passed")
