@@ -14,6 +14,8 @@ from gi.repository import Adw  # noqa: E402
 from serviceforge.models.service import ServiceRecord
 from serviceforge.models.details import ServiceDetails
 from serviceforge.backend.systemd_client import SystemdClient
+from serviceforge.backend.live_monitor import LiveMonitor
+from serviceforge.models.monitoring import ActivityEvent
 from serviceforge.ui.main_window import MainWindow
 from unittest.mock import patch
 from serviceforge.ui.overview_view import OverviewView
@@ -37,6 +39,13 @@ def run() -> None:
         refresh_services=lambda: None,
     )
     overview.update([record], scope="system")
+    overview.set_activity((
+        ActivityEvent(
+            "system", "2026-11-11 15:20:00", "Job finished",
+            "Result: done", "test.service",
+        ),
+    ))
+    overview.set_monitor_status("Live · test manager")
     overview.update([], scope="user")
     overview.show_error("Expected smoke-test error", scope="system")
 
@@ -46,8 +55,13 @@ def run() -> None:
 
     # Suppress the initial D-Bus request: CI has no running systemd manager.
     app = Adw.Application(application_id="io.github.tobiasGuta.ServiceForge")
-    with patch.object(SystemdClient, "fetch_services", lambda *_: None):
+    with patch.object(SystemdClient, "fetch_services", lambda *_: None), patch.object(
+        LiveMonitor, "start", lambda *_: None
+    ):
         window = MainWindow(application=app)
+    assert window._live_button.get_active()
+    assert window._monitor_status is not None
+    assert "system" in window._activity_feeds
     window._current_record = record
     window._detail_unit = ServiceDetails(
         scope="system",

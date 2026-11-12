@@ -44,6 +44,8 @@ jobs:
         run: PYTHONPATH=src python3 tests/actions_smoke.py
       - name: Check installed-but-unloaded service lookup
         run: PYTHONPATH=src python3 tests/unit_lookup_smoke.py
+      - name: Check mocked live manager signals, debounce, and fallback
+        run: PYTHONPATH=src python3 tests/monitor_smoke.py
       - name: Check mocked persistent unit-file actions and Polkit denial
         run: PYTHONPATH=src python3 tests/unit_file_actions_smoke.py
       - name: Run pure-Python tests
