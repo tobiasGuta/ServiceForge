@@ -83,6 +83,7 @@ class FilePolicyTests(unittest.TestCase):
         self.assertFalse(outcome("enable", "disabled").verified)
         self.assertTrue(outcome("unmask", "disabled").verified)
         self.assertFalse(outcome("unmask", "masked").verified)
+        self.assertFalse(outcome("unmask", "not-found").verified)
 
 
 if __name__ == "__main__":

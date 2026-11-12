@@ -114,6 +114,7 @@ class FileActionOutcome:
                 "disable": "disabled",
                 "mask": "masked",
             }[self.action]
-        return self.action == "unmask" and self.current_state not in (
-            "masked", "masked-runtime"
+        return self.action == "unmask" and self.current_state in (
+            "disabled", "enabled", "static", "indirect", "generated",
+            "linked", "linked-runtime", "alias",
         )
