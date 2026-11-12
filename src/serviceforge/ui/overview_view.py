@@ -9,6 +9,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk  # noqa: E402
 
+from serviceforge.models.monitoring import ActivityEvent
 from serviceforge.models.overview import summarize_services
 from serviceforge.models.service import Scope, ServiceRecord
 
@@ -28,6 +29,8 @@ class OverviewView(Gtk.Box):
         toolbar.set_vexpand(True)
         self.append(toolbar)
         self._inspect_service = inspect_service
+        self._records_by_name: dict[str, ServiceRecord] = {}
+        self._events: tuple[ActivityEvent, ...] = ()
 
         header = Adw.HeaderBar()
         header.set_title_widget(Gtk.Label(label="Overview"))
@@ -55,6 +58,11 @@ class OverviewView(Gtk.Box):
         self._scope_label.add_css_class("dim-label")
         self._scope_label.set_wrap(True)
         body.append(self._scope_label)
+
+        self._monitor_status = Gtk.Label(xalign=0)
+        self._monitor_status.set_wrap(True)
+        self._monitor_status.add_css_class("dim-label")
+        body.append(self._monitor_status)
 
         cards = Gtk.FlowBox()
         cards.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -97,6 +105,27 @@ class OverviewView(Gtk.Box):
         )
         body.append(self._failed_container)
 
+        recent_heading = Gtk.Label(label="Recent manager activity", xalign=0)
+        recent_heading.add_css_class("title-2")
+        body.append(recent_heading)
+
+        self._activity_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=10
+        )
+        body.append(self._activity_container)
+
+        history_note = Gtk.Label(
+            label=(
+                "Only manager events observed while Live monitoring is active "
+                "in this app session appear here. This is not journal history "
+                "or a complete audit trail."
+            ),
+            xalign=0,
+        )
+        history_note.set_wrap(True)
+        history_note.add_css_class("dim-label")
+        body.append(history_note)
+
         explanation = Gtk.Label(
             label=(
                 "Counts describe loaded systemd services only. They do not "
@@ -112,6 +141,50 @@ class OverviewView(Gtk.Box):
         scroller.set_child(body)
         toolbar.set_content(scroller)
         self.update(None, scope="system")
+        self.set_activity(())
+
+    def set_monitor_status(self, message: str) -> None:
+        self._monitor_status.set_text(message)
+
+    def set_activity(self, events: tuple[ActivityEvent, ...]) -> None:
+        """Show observed manager signals without inventing unit state changes."""
+        self._events = events
+        self._render_activity()
+
+    def _render_activity(self) -> None:
+        while (child := self._activity_container.get_first_child()) is not None:
+            self._activity_container.remove(child)
+
+        group = Adw.PreferencesGroup()
+        if not self._events:
+            row = Adw.ActionRow()
+            row.set_title("No activity observed yet")
+            row.set_subtitle("Start or stop a disposable service to see events here.")
+            group.add(row)
+        else:
+            for event in self._events[:10]:
+                row = Adw.ActionRow()
+                row.set_title(event.title)
+                row.set_use_markup(False)
+                if event.unit:
+                    subtitle = f"{event.when} · {event.unit} · {event.detail}"
+                else:
+                    subtitle = f"{event.when} · {event.detail}"
+                row.set_subtitle(subtitle)
+                row.set_subtitle_lines(2)
+                row.set_subtitle_selectable(True)
+                record = self._records_by_name.get(event.unit) if event.unit else None
+                if record is not None:
+                    button = Gtk.Button(label="Inspect")
+                    button.set_valign(Gtk.Align.CENTER)
+                    button.connect(
+                        "clicked",
+                        lambda _button, selected=record: self._inspect_service(selected),
+                    )
+                    row.add_suffix(button)
+                    row.set_activatable_widget(button)
+                group.add(row)
+        self._activity_container.append(group)
 
     def update(
         self,
@@ -121,6 +194,10 @@ class OverviewView(Gtk.Box):
     ) -> None:
         manager_name = "System manager" if scope == "system" else "User manager"
         self._scope_label.set_text(manager_name + " · read-only loaded-unit snapshot")
+        self._records_by_name = {
+            record.name: record for record in records
+        } if records is not None else {}
+        self._render_activity()
         self._clear_failures()
         if records is None:
             for number in self._numbers.values():
