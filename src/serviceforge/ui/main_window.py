@@ -10,6 +10,9 @@ from gi.repository import Adw, Gio, GObject, Gtk, Pango  # noqa: E402
 from serviceforge.backend.systemd_client import SystemdClient
 from serviceforge.models.details import ServiceDetails
 from serviceforge.models.service import ServiceRecord
+from serviceforge.models.overview import summarize_services
+from serviceforge.ui.overview_view import OverviewView
+from serviceforge.ui.journal_view import JournalView
 
 
 FILTER_OPTIONS = ("All services", "Active", "Inactive", "Failed", "Enabled", "Masked")
@@ -45,6 +48,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._stack.set_hhomogeneous(True)
         self._stack.add_named(self._create_explorer(), "explorer")
         self._stack.add_named(self._create_inspector(), "inspector")
+        self._overview = OverviewView(
+            self._show_services, self._open_inspector, self.refresh
+        )
+        self._stack.add_named(self._overview, "overview")
+        self._journal = JournalView(self._on_journal_back)
+        self._stack.add_named(self._journal, "journal")
         self.set_content(self._stack)
 
         self._search.connect("search-changed", self._on_filter_changed)
@@ -57,6 +66,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._inspect_button.connect("clicked", self._on_inspect_clicked)
         self._detail_back.connect("clicked", self._on_back_clicked)
         self._detail_refresh.connect("clicked", self._on_detail_refresh_clicked)
+        self._overview_button.connect("clicked", self._on_overview_clicked)
+        self._logs_button.connect("clicked", self._on_logs_clicked)
+        self.connect("close-request", self._on_window_close)
         self._on_selected_changed()
         self.refresh()
 
@@ -72,6 +84,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._scope.set_tooltip_text("Choose the systemd manager")
         header.pack_start(self._scope)
+
+        self._overview_button = Gtk.Button(label="Overview")
+        self._overview_button.set_tooltip_text("View loaded-service summary and failures")
+        header.pack_start(self._overview_button)
 
         self._refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
         self._refresh.set_tooltip_text("Refresh loaded services")
@@ -226,6 +242,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
         self._detail_refresh.set_tooltip_text("Refresh selected service details")
         header.pack_end(self._detail_refresh)
+        self._logs_button = Gtk.Button(label="Logs")
+        self._logs_button.set_tooltip_text("Read this service's current-boot journal")
+        header.pack_end(self._logs_button)
         toolbar.add_top_bar(header)
 
         scroller = Gtk.ScrolledWindow()
@@ -312,6 +331,27 @@ class MainWindow(Adw.ApplicationWindow):
         if item is not None:
             self._open_inspector(item.record)
 
+    def _show_services(self) -> None:
+        self._stack.set_visible_child_name("explorer")
+
+    def _on_overview_clicked(self, *_args: object) -> None:
+        self._stack.set_visible_child_name("overview")
+
+    def _on_logs_clicked(self, *_args: object) -> None:
+        if self._current_record is None:
+            return
+        self._stack.set_visible_child_name("journal")
+        self._journal.open(self._current_record)
+
+    def _on_journal_back(self) -> None:
+        self._journal.close()
+        self._stack.set_visible_child_name("inspector")
+
+    def _on_window_close(self, *_args: object) -> bool:
+        self._journal.close()
+        self._journal.shutdown()
+        return False
+
     def _on_back_clicked(self, *_args: object) -> None:
         self._detail_request_id += 1
         self._current_record = None
@@ -387,26 +427,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._client.fetch_details(record.scope, record.name, succeeded, failed)
 
     def _update_summary(self, *_args: object) -> None:
-        records = [self._store.get_item(i).record for i in range(self._store.get_n_items())]
-        counts = {
-            state: sum(record.active_state == state for record in records)
-            for state in ("active", "inactive", "failed")
-        }
-        other = len(records) - sum(counts.values())
-        parts = [
-            f"Showing {self._filtered.get_n_items()} of {len(records)} loaded services",
-            f"{counts['active']} active",
-            f"{counts['inactive']} inactive",
-            f"{counts['failed']} failed",
+        records = [
+            self._store.get_item(i).record for i in range(self._store.get_n_items())
         ]
-        if other:
-            parts.append(f"{other} other")
+        snapshot = summarize_services(records)
+        parts = [
+            f"Showing {self._filtered.get_n_items()} of {snapshot.total} loaded services",
+            f"{snapshot.active} active",
+            f"{snapshot.inactive} inactive",
+            f"{snapshot.failed} failed",
+        ]
+        if snapshot.other:
+            parts.append(f"{snapshot.other} other")
         self._summary.set_text("  ·  ".join(parts))
 
     def refresh(self) -> None:
         self._request_id += 1
         request_id = self._request_id
         scope = "system" if self._scope.get_selected() == 0 else "user"
+        self._overview.update(None, scope=scope)
         self._notice.set_visible(False)
         self._refresh.set_sensitive(False)
         self._spinner.set_visible(True)
@@ -419,6 +458,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._store.remove_all()
             for record in records:
                 self._store.append(ServiceItem(record))
+            self._overview.update(records, scope=scope)
             self._set_idle()
             if warning:
                 self._notice.set_text(
@@ -432,6 +472,7 @@ class MainWindow(Adw.ApplicationWindow):
             if request_id != self._request_id:
                 return
             self._store.remove_all()
+            self._overview.show_error(message, scope=scope)
             self._set_idle()
             self._notice.set_text(message)
             self._notice.set_visible(True)
