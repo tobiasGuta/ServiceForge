@@ -40,6 +40,8 @@ jobs:
           Xvfb :99 -screen 0 1280x800x24 >/tmp/serviceforge-xvfb.log 2>&1 &
           sleep 2
           DISPLAY=:99 GDK_BACKEND=x11 GSK_RENDERER=cairo PYTHONPATH=src python3 tests/gui_smoke.py
+      - name: Check mocked service-job result tracking
+        run: PYTHONPATH=src python3 tests/actions_smoke.py
       - name: Run pure-Python tests
         run: python3 -m unittest discover -s tests -v
-      # Headless GTK construction is not a substitute for Fedora desktop integration tests.
+      # Headless checks are not a substitute for Fedora desktop integration tests.
