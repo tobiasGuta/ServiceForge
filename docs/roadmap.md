@@ -21,11 +21,15 @@
 - [ ] Signal-driven updates with limited fallback polling
 - [ ] D-Bus error/permission integration tests
 
-## Phase 3: Service management
+## Phase 3: Service management (experimental)
 
-- Polkit-mediated start/stop/restart, enable/disable
-- Confirmation dialogs, action gating, and job-completion tracking
-- Test against disposable services only
+- [x] Start/Stop/Restart/Reload via systemd D-Bus, opt-in after confirmation
+- [x] Existing systemd/Polkit authorization integration
+- [x] JobRemoved correlation and unknown-outcome timeout handling
+- [x] Conservative runtime action policy and pure-Python tests
+- [ ] Fedora manual validation using disposable units (required before release)
+- [ ] Enable/Disable and Mask/Unmask (separate authorized file operations)
+- [ ] More comprehensive dependency-impact previews
 
 ## Phase 4: Diagnostics (begun early, read-only)
 
@@ -33,6 +37,7 @@
 - [x] Bounded current-boot journal history per selected service
 - [x] Local severity filtering, text search and explicit copy action
 - [x] Journal reader pure-Python tests using a fake Reader
+- [x] Expand journal matches with selected manager lifecycle entries
 - [ ] Fedora desktop validation for Overview and Logs
 - [ ] Live journal streaming and richer matching of manager-generated unit messages
 - [ ] Resource accounting where available

@@ -71,3 +71,25 @@ are delivered via `GLib.idle_add`, and generation counters prevent stale
 results from appearing after changing service/view or refreshing. Search and
 severity filtering are local transformations on the bounded snapshot.
 The copy action exports only text currently displayed and is user-initiated.
+
+## Runtime service management (experimental)
+
+The Inspector creates no writes during normal navigation. The action policy
+(`models.actions`) restricts which buttons are offered and requires a
+loaded service name with conservative syntax; runtime transitions show no
+buttons. `CanReload` must be explicitly true to offer Reload.
+
+The action controller sends `StartUnit`, `StopUnit`, `RestartUnit`, or
+`ReloadUnit` with job mode `replace`. The D-Bus call uses
+`Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION`, which permits systemd
+to request Polkit authentication in an ordinary user session.
+
+Before starting an action, the client calls Manager.Subscribe, listens for
+Manager.JobRemoved, and then queues the job. Completion is correlated by the
+returned job path. Early job results are cached in case the signal arrives
+before the D-Bus reply. Result `done` is successful job completion, but the
+post-action service state is always fetched again. Timeouts are reported as
+unknown outcomes, not action failures.
+
+Unit-file enablement and masking need a distinct, tested API path; they are
+not part of this initial write-enabled implementation.

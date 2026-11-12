@@ -30,3 +30,20 @@ No operation should bypass existing permissions or silently weaken service harde
   must explicitly click **Copy shown logs**; logs are not automatically saved
   or sent anywhere. Do not publicly share copied logs without reviewing them.
 - The viewer does not silently enable journal persistence or modify logs.
+
+## Experimental runtime controls
+
+The Inspector now offers Start, Stop, Restart, and (only when systemd reports
+`CanReload=true`) Reload. It does not write service files or implement unit
+file enablement/masking. Every operation shows a confirmation dialog that
+defaults to Cancel. High-impact services receive additional warnings.
+Buttons are conservatively gated by last-read loaded state; the systemd
+manager still determines actual applicability and whether authorization is
+required. The UI uses `ALLOW_INTERACTIVE_AUTHORIZATION` to permit Polkit
+authentication without elevating the GUI.
+
+The application listens for `JobRemoved` to distinguish an accepted job
+from a completed job. If the result is not observed, the UI explicitly warns
+that the final state is unknown and requests a refresh. Never test these
+actions on essential system units before proving behavior on disposable
+services. ServiceForge does not bypass SELinux or Polkit.

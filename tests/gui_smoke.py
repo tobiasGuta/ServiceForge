@@ -12,6 +12,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw  # noqa: E402
 
 from serviceforge.models.service import ServiceRecord
+from serviceforge.models.details import ServiceDetails
+from serviceforge.backend.systemd_client import SystemdClient
+from serviceforge.ui.main_window import MainWindow
+from unittest.mock import patch
 from serviceforge.ui.overview_view import OverviewView
 from serviceforge.ui.journal_view import JournalView
 
@@ -39,7 +43,24 @@ def run() -> None:
     journal = JournalView(lambda: None)
     journal.close()
     journal.shutdown()
-    print("GTK overview and journal widgets constructed successfully")
+
+    # Suppress the initial D-Bus request: CI has no running systemd manager.
+    app = Adw.Application(application_id="io.github.tobiasGuta.ServiceForge")
+    with patch.object(SystemdClient, "fetch_services", lambda *_: None):
+        window = MainWindow(application=app)
+    window._current_record = record
+    window._detail_unit = ServiceDetails(
+        scope="system",
+        requested_name=record.name,
+        unit={"CanReload": True},
+        service={},
+    )
+    window._update_action_buttons()
+    assert window._action_buttons["stop"].get_sensitive()
+    assert window._action_buttons["reload"].get_sensitive()
+    assert not window._action_buttons["start"].get_sensitive()
+    window.destroy()
+    print("GTK overview, journal and management controls constructed successfully")
 
 
 if __name__ == "__main__":
