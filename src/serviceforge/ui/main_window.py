@@ -470,6 +470,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._monitor.stop()
 
     def _on_scope_changed(self, *_args: object) -> None:
+        self._journal.close()
         self._on_back_clicked()
         scope = self._selected_scope()
         self._overview.set_activity(self._activity_feeds[scope].recent())
@@ -911,9 +912,12 @@ class MainWindow(Adw.ApplicationWindow):
         def succeeded(records: list[ServiceRecord], warning: str | None) -> None:
             if request_id != self._request_id:
                 return
-            self._store.remove_all()
-            for record in records:
-                self._store.append(ServiceItem(record))
+            # One model notification rather than hundreds of append events
+            # during automatic refresh, preserving GTK responsiveness.
+            self._store.splice(
+                0, self._store.get_n_items(),
+                [ServiceItem(record) for record in records],
+            )
             self._overview.update(records, scope=scope)
             self._set_idle()
             if warning:
