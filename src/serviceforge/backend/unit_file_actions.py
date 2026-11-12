@@ -16,9 +16,9 @@ from gi.repository import Gio, GLib  # noqa: E402
 
 from serviceforge.backend.systemd_client import SystemdClient
 from serviceforge.models.actions import validate_unit
-from serviceforge.models.service import Scope
+from serviceforge.models.service import Scope, ServiceRecord
 from serviceforge.models.unit_files import (
-    FILE_METHODS, EXPECTED_STATES, FileActionOutcome,
+    FILE_METHODS, FileActionOutcome, file_action_allowed,
 )
 
 
@@ -96,22 +96,20 @@ class UnitFileActions:
         SystemdClient._connect(scope, connected, on_error)
 
     def execute(
-        self, record_scope: Scope, unit_name: str, action: str,
-        expected_state: str,
+        self, record: ServiceRecord, action: str,
+        expected_state: str, active_state: str | None,
         on_success: Success, on_error: Error,
     ) -> None:
         if self._in_progress:
             on_error("Another unit-file operation is still in progress")
             return
-        if (
-            record_scope not in ("system", "user")
-            or not validate_unit(unit_name)
-            or action not in FILE_METHODS
-            or expected_state != EXPECTED_STATES[action]
+        if not file_action_allowed(
+            record, action, expected_state, active_state=active_state,
         ):
-            on_error("Unsupported operation or stale unit-file state")
+            on_error("Operation is not permitted for this unit's file state")
             return
 
+        record_scope, unit_name = record.scope, record.name
         self._in_progress = True
         completed = False
 
