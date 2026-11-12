@@ -56,7 +56,29 @@ def run() -> None:
         service={},
     )
     window._update_action_buttons()
+    assert window._action_buttons["start"].get_sensitive()
+    assert not window._action_buttons["stop"].get_sensitive()
+    assert not window._action_buttons["restart"].get_sensitive()
+
+    active_record = ServiceRecord(
+        scope="system",
+        name="active-test.service",
+        description="Active test service",
+        load_state="loaded",
+        active_state="active",
+        sub_state="running",
+        unit_file_state="enabled",
+    )
+    window._current_record = active_record
+    window._detail_unit = ServiceDetails(
+        scope="system",
+        requested_name=active_record.name,
+        unit={"CanReload": True, "CanStart": True, "CanStop": True},
+        service={},
+    )
+    window._update_action_buttons()
     assert window._action_buttons["stop"].get_sensitive()
+    assert window._action_buttons["restart"].get_sensitive()
     assert window._action_buttons["reload"].get_sensitive()
     assert not window._action_buttons["start"].get_sensitive()
     window.destroy()
