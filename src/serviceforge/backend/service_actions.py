@@ -111,7 +111,7 @@ class ServiceActions:
                 return GLib.SOURCE_REMOVE
 
             def queued(reply: GLib.Variant) -> None:
-                nonlocal job_path
+                nonlocal job_path, timeout_id
                 if finished:
                     return
                 value = reply.unpack()
@@ -121,6 +121,9 @@ class ServiceActions:
                 job_path = value[0]
                 if job_path in early_results:
                     finish_result(early_results[job_path])
+                else:
+                    # Only start the job timer after authorization and queueing.
+                    timeout_id = GLib.timeout_add_seconds(MAX_WAIT_SECONDS, expired)
 
             def subscribed(_reply: GLib.Variant) -> None:
                 nonlocal subscription_id, timeout_id, subscribed_to_manager
@@ -131,7 +134,6 @@ class ServiceActions:
                     BUS_NAME, MANAGER_INTERFACE, "JobRemoved", MANAGER_PATH,
                     None, Gio.DBusSignalFlags.NONE, on_job_removed, None,
                 )
-                timeout_id = GLib.timeout_add_seconds(MAX_WAIT_SECONDS, expired)
                 SystemdClient._call(
                     connection,
                     METHODS[action],
@@ -139,6 +141,7 @@ class ServiceActions:
                     finish_error,
                     parameters=GLib.Variant("(ss)", (unit_name, "replace")),
                     flags=Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION,
+                    timeout_ms=180000,  # Leave time for the user to answer Polkit.
                 )
 
             # systemd requires Subscribe() before it emits JobRemoved signals.

@@ -74,6 +74,7 @@ class SystemdClient:
         interface: str = MANAGER_INTERFACE,
         parameters: GLib.Variant | None = None,
         flags: Gio.DBusCallFlags = Gio.DBusCallFlags.NONE,
+        timeout_ms: int = TIMEOUT_MS,
     ) -> None:
         def completed(source: Gio.DBusConnection, result: Gio.AsyncResult, _data: object) -> None:
             try:
@@ -91,7 +92,7 @@ class SystemdClient:
             parameters,
             None,
             flags,
-            TIMEOUT_MS,
+            timeout_ms,
             None,
             completed,
             None,
