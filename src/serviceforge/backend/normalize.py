@@ -1,11 +1,10 @@
-"""Translate systemd manager replies into strongly typed loaded-service records.
+"""Reconcile loaded systemd units with installed .service unit files.
 
-ListUnits rows: (name, description, load, active, sub, following, object_path,
-                 job_id, job_type, job_path)
-ListUnitFiles rows: (absolute_path, unit_file_state)
+`ListUnits` contains currently loaded units and accurate runtime state.
+`ListUnitFiles` contains unit files, including ones systemd unloaded.
 
-ListUnits only returns loaded units. File names may not match instantiated or
-transient services; lack of a matching entry must never be called 'disabled'.
+Unloaded entries intentionally display no made-up ActiveState or SubState.
+An instance may not have an exact basename match with a template unit file.
 """
 
 from pathlib import PurePosixPath
@@ -19,19 +18,22 @@ def normalize_services(
     unit_file_rows: Iterable[Sequence[object]],
     scope: Scope,
 ) -> list[ServiceRecord]:
-    """Return loaded .service units with known file states, sorted by name."""
+    """Combine loaded services with installed-but-unloaded concrete unit files."""
     if scope not in ("system", "user"):
         raise ValueError(f"Unrecognized manager scope: {scope!r}")
 
-    file_states: dict[str, str] = {}
+    files: dict[str, tuple[str, str]] = {}
     for row in unit_file_rows:
         if len(row) < 2:
             raise ValueError("Malformed ListUnitFiles row")
         path, state = row[:2]
         if isinstance(path, str) and isinstance(state, str):
-            file_states.setdefault(PurePosixPath(path).name, state)
+            name = PurePosixPath(path).name
+            if name.endswith(".service"):
+                files.setdefault(name, (path, state))
 
     records: list[ServiceRecord] = []
+    loaded_names: set[str] = set()
     for row in unit_rows:
         if len(row) < 7:
             raise ValueError("Malformed ListUnits row")
@@ -44,6 +46,7 @@ def normalize_services(
         if not name.endswith(".service"):
             continue
         path = row[6] if isinstance(row[6], str) else None
+        file_info = files.get(name)
         records.append(
             ServiceRecord(
                 scope=scope,
@@ -52,8 +55,31 @@ def normalize_services(
                 load_state=load,
                 active_state=active,
                 sub_state=sub,
-                unit_file_state=file_states.get(name),
+                unit_file_state=file_info[1] if file_info else None,
                 object_path=path,
+                loaded=True,
+                unit_file_path=file_info[0] if file_info else None,
+            )
+        )
+        loaded_names.add(name)
+
+    for name, (path, state) in files.items():
+        # A bare template (foo@.service) requires an instance parameter.
+        # It must not be presented as an ordinary startable unit.
+        if name in loaded_names or name.endswith("@.service"):
+            continue
+        records.append(
+            ServiceRecord(
+                scope=scope,
+                name=name,
+                description="Unit file available (not currently loaded)",
+                load_state="unloaded",
+                active_state="unknown",
+                sub_state="unknown",
+                unit_file_state=state,
+                object_path=None,
+                loaded=False,
+                unit_file_path=path,
             )
         )
     records.sort(key=lambda record: record.name.casefold())

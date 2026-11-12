@@ -1,4 +1,4 @@
-"""Typed, immutable records for read-only systemd inspection."""
+"""Typed, immutable records for loaded units and installed unit files."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -17,6 +17,8 @@ class ServiceRecord:
     sub_state: str
     unit_file_state: str | None
     object_path: str | None = None
+    loaded: bool = True
+    unit_file_path: str | None = None
 
     @property
     def startup_display(self) -> str:

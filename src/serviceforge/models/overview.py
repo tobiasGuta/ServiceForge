@@ -17,8 +17,8 @@ class ServiceSnapshot:
 
 
 def summarize_services(records: Iterable[ServiceRecord]) -> ServiceSnapshot:
-    """Count actual ActiveState values, without treating inactive as failed."""
-    rows = tuple(records)
+    """Only count systemd's observed loaded units, never unloaded file entries."""
+    rows = tuple(item for item in records if item.loaded)
     active = sum(item.active_state == "active" for item in rows)
     inactive = sum(item.active_state == "inactive" for item in rows)
     failed = sum(item.active_state == "failed" for item in rows)
