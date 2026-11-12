@@ -36,6 +36,8 @@ From the service table, click **Overview** for the dashboard. To inspect a unit,
 
 ### Experimental service actions
 
+For a safe hands-on test, follow [the disposable user-service test guide](docs/testing.md).
+
 Inside the Inspector, eligible loaded services show **Start**, **Stop**, **Restart**, and sometimes **Reload**. Reload is only offered if the service's `Unit.CanReload` is true. Buttons require refreshed service details, and **every operation requires confirmation**. Critical services receive additional warnings. System services may prompt for Polkit authentication. ServiceForge tracks systemd's `JobRemoved` result and refreshes the unit; it does not assume queueing is success.
 
 **For your first test use a disposable service you created**, not NetworkManager, SSH, your display manager, logind, auditing, or other critical system components. Stop/restart can interrupt dependent services. This release has not yet been tested for live write operations on the maintainer's Fedora laptop. For systemd and Polkit semantics, see `docs/security-model.md`.
