@@ -62,6 +62,15 @@ def run() -> None:
     assert window._live_button.get_active()
     assert window._monitor_status is not None
     assert "system" in window._activity_feeds
+    # GTK can display manager events and keep user/system activity separate.
+    observed = ActivityEvent(
+        "system", "2026-11-11 15:30:00", "Job finished",
+        "Result: done", "test.service",
+    )
+    window._on_monitor_activity(observed)
+    assert window._activity_feeds["system"].recent() == (observed,)
+    assert window._activity_feeds["user"].recent() == ()
+    assert window._overview._events == (observed,)
     window._current_record = record
     window._detail_unit = ServiceDetails(
         scope="system",

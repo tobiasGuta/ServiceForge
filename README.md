@@ -47,6 +47,8 @@ When event subscription is unavailable, the UI clearly reports the problem and u
 
 The Overview's **Recent manager activity** shows at most 10 of the last 30 signals observed for that manager **during this app session**, not historical logs or an audit trail. Unit loaded/unloaded events describe systemd's memory only, not installed-unit presence or a successful service start. For historical diagnostics, continue using the Logs view. Signals never authorize or perform administrative actions.
 
+To verify Live monitoring with a disposable user unit, follow the [Fedora live-monitoring test guide](docs/live-monitoring-testing.md).
+
 ### Experimental service actions
 
 For a safe hands-on test, follow [the disposable user-service test guide](docs/testing.md).
