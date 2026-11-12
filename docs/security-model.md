@@ -47,3 +47,9 @@ from a completed job. If the result is not observed, the UI explicitly warns
 that the final state is unknown and requests a refresh. Never test these
 actions on essential system units before proving behavior on disposable
 services. ServiceForge does not bypass SELinux or Polkit.
+
+The action policy also reads `Unit.CanStart`, `CanStop`, and `CanReload`.
+If these properties are missing or false, the corresponding operation is not
+offered. The `RefuseManualStart` and `RefuseManualStop` flags also disable
+affected buttons. These checks improve safety but do not replace systemd's own
+authorization and job applicability decisions.

@@ -52,7 +52,7 @@ def run() -> None:
     window._detail_unit = ServiceDetails(
         scope="system",
         requested_name=record.name,
-        unit={"CanReload": True},
+        unit={"CanReload": True, "CanStart": True, "CanStop": True},
         service={},
     )
     window._update_action_buttons()

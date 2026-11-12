@@ -404,33 +404,32 @@ class MainWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("inspector")
         self._load_details(record)
 
-    def _update_action_buttons(self) -> None:
+    def _eligible_actions(self) -> set[str]:
         record = self._current_record
-        available = (
-            allowed_actions(
-                record,
-                can_reload=self._detail_unit.unit.get("CanReload") is True,
-            )
-            if record is not None and self._detail_unit is not None
-            else set()
+        details = self._detail_unit
+        if record is None or details is None:
+            return set()
+        props = details.unit
+        return allowed_actions(
+            record,
+            can_start=props.get("CanStart") is True,
+            can_stop=props.get("CanStop") is True,
+            can_reload=props.get("CanReload") is True,
+            refuse_manual_start=props.get("RefuseManualStart") is True,
+            refuse_manual_stop=props.get("RefuseManualStop") is True,
         )
+
+    def _update_action_buttons(self) -> None:
+        available = self._eligible_actions()
         for action, button in self._action_buttons.items():
-            button.set_sensitive(
-                action in available and not self._action_pending
-            )
+            button.set_sensitive(action in available and not self._action_pending)
 
     def _confirm_action(self, action: str) -> None:
         record = self._current_record
         if (
             record is None
             or self._action_pending
-            or action not in allowed_actions(
-                record,
-                can_reload=(
-                    self._detail_unit is not None
-                    and self._detail_unit.unit.get("CanReload") is True
-                ),
-            )
+            or action not in self._eligible_actions()
         ):
             return
         heading = f"{action.capitalize()} {record.name}?"

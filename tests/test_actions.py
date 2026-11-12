@@ -23,20 +23,52 @@ class RuntimeActionPolicyTests(unittest.TestCase):
             self.assertFalse(validate_unit(name))
 
     def test_active_service_allows_stop_restart_not_start(self):
-        self.assertEqual(allowed_actions(service()), {"stop", "restart"})
+        self.assertEqual(allowed_actions(service()), set())
         self.assertEqual(
-            allowed_actions(service(), can_reload=True),
+            allowed_actions(service(), can_start=True, can_stop=True),
+            {"stop", "restart"},
+        )
+        self.assertEqual(
+            allowed_actions(
+                service(), can_start=True, can_stop=True, can_reload=True
+            ),
             {"stop", "restart", "reload"},
         )
 
     def test_inactive_or_failed_allows_only_start(self):
-        self.assertEqual(allowed_actions(service(active="inactive")), {"start"})
-        self.assertEqual(allowed_actions(service(active="failed")), {"start"})
+        self.assertEqual(
+            allowed_actions(service(active="inactive"), can_start=True), {"start"}
+        )
+        self.assertEqual(
+            allowed_actions(service(active="failed"), can_start=True), {"start"}
+        )
 
     def test_no_actions_for_missing_masked_or_transitioning(self):
         self.assertEqual(allowed_actions(service(load="not-found")), set())
         self.assertEqual(allowed_actions(service(startup="masked")), set())
         self.assertEqual(allowed_actions(service(active="activating")), set())
+
+    def test_manual_refusal_and_capabilities_are_respected(self):
+        self.assertEqual(
+            allowed_actions(
+                service(), can_start=True, can_stop=True,
+                refuse_manual_stop=True,
+            ),
+            set(),
+        )
+        self.assertEqual(
+            allowed_actions(
+                service(), can_start=False, can_stop=True,
+            ),
+            {"stop"},
+        )
+        self.assertEqual(
+            allowed_actions(
+                service(active="inactive"), can_start=True,
+                refuse_manual_start=True,
+            ),
+            set(),
+        )
 
     def test_high_impact_warning_and_runtime_scope(self):
         text = confirmation_text("restart", service(name="NetworkManager.service"))

@@ -32,18 +32,36 @@ def validate_unit(name: str) -> bool:
     )
 
 
-def allowed_actions(record: ServiceRecord, *, can_reload: bool = False) -> set[str]:
-    """Suggest actions; systemd remains authoritative about actual support."""
+def allowed_actions(
+    record: ServiceRecord,
+    *,
+    can_start: bool = False,
+    can_stop: bool = False,
+    can_reload: bool = False,
+    refuse_manual_start: bool = False,
+    refuse_manual_stop: bool = False,
+) -> set[str]:
+    """Offer only operations explicitly supported by the loaded unit.
+
+    Systemd still determines authorization and actual job applicability.
+    RefuseManualStart/Stop are honored conservatively, including restart.
+    """
     if not validate_unit(record.name) or record.load_state != "loaded":
         return set()
     if record.unit_file_state in ("masked", "masked-runtime"):
         return set()
+    start_ok = can_start and not refuse_manual_start
+    stop_ok = can_stop and not refuse_manual_stop
     if record.active_state == "active":
-        available = {"stop", "restart"}
+        available: set[str] = set()
+        if stop_ok:
+            available.add("stop")
+        if stop_ok and start_ok:
+            available.add("restart")
         if can_reload:
             available.add("reload")
         return available
-    if record.active_state in ("inactive", "failed"):
+    if record.active_state in ("inactive", "failed") and start_ok:
         return {"start"}
     return set()
 
