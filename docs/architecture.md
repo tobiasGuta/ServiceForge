@@ -93,3 +93,21 @@ unknown outcomes, not action failures.
 
 Unit-file enablement and masking need a distinct, tested API path; they are
 not part of this initial write-enabled implementation.
+
+## Unit lifecycle after Stop
+
+Systemd may garbage-collect an inactive unit with no remaining references.
+`GetUnit(name)` then returns `NoSuchUnit` despite the unit's file still being
+installed. To represent this accurately, ServiceForge now reconciles loaded
+unit records (`ListUnits`) with disk-backed service definitions
+(`ListUnitFiles`), with separate explicit `loaded` flags.
+
+For installed units that are no longer loaded, the Inspector uses the
+read-only-in-effect `Manager.LoadUnit` call to resolve an in-memory Unit
+object without starting it. It then reads Unit and Service properties.
+A missing/deleted unit file produces a refresh hint without repeated retries.
+
+Unloaded entries have no observed `ActiveState`; they are marked
+`unloaded/unknown`, not assumed inactive. The Overview continues to count
+loaded units only. The explorer's All/Loaded/Unloaded filters distinguish
+these populations.

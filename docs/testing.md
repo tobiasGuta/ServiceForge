@@ -46,7 +46,12 @@ Switch the top-left dropdown to **User services**, search
   verify that MainPID or state changed on refresh.
 - Try Stop, then refresh or search again. The stopped unit may remain loaded,
   but availability depends on the systemd manager's unit lifecycle.
-- If the unit is still visible when inactive, Start should become available.
+- After Stop, systemd may unload the inactive service. In ServiceForge,
+  choose **All services** or **Unloaded** and search for the unit file.
+- The Inspector can resolve its installed unit file without starting it,
+  then offer **Start** if `CanStart` is reported.
+- After you remove the unit file during cleanup, the entry should disappear
+  from the list on refresh.
 - Check Logs for entries. It may contain lifecycle events emitted by the
   user manager, but no output from `sleep` itself is expected.
 

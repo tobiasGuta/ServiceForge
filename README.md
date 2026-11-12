@@ -7,7 +7,7 @@
 ## Features in the current development preview
 
 - GTK4 and Libadwaita window using Fedora's system-provided PyGObject bindings.
-- Asynchronous discovery of loaded services from the system or user manager.
+- Asynchronous discovery of loaded services and installed-but-unloaded unit files from the system or user manager.
 - Search, quick filters, clickable column sorting, and manual refresh.
 - Status icons and counts for active, inactive, and failed loaded services.
 - Select a row to open the **Service Inspector**, or click **Inspect**.
@@ -21,7 +21,9 @@
 - Existing systemd/Polkit authorization; no root GUI or custom privileged helper.
 - Enable/Disable and Mask/Unmask are **not yet implemented**.
 
-Only **loaded units** appear in this milestone. Installed but unloaded unit files will be added in a later service-discovery improvement. The inspector uses `GetUnit` plus `Properties.GetAll` for the Unit and Service interfaces, and it shows partial information when a service-specific interface cannot be read. Unit-file state is shown as `Unknown` when it cannot be mapped reliably; it is not guessed as `disabled`.
+The service list merges currently loaded units with installed service unit files, even after systemd unloads stopped services. Unloaded entries show **unloaded** and an **unknown** runtime state; their last active status is not invented. Bare templates without an instance are excluded. The Overview dashboard still counts **loaded units only**.
+
+The Inspector uses `GetUnit` for loaded-only units and `LoadUnit` for known installed unit files. `LoadUnit` resolves configuration in systemd's memory without starting the service. It then reads `Unit` and `Service` properties. An unavailable or deleted file results in an actionable refresh message rather than a loop. Unit-file states with no exact match remain `Unknown`, never guessed as `disabled`.
 
 ## Run from source on Fedora
 
@@ -71,7 +73,7 @@ Use a regular user account. Do not run the GUI with `sudo`.
 
 ServiceForge is not an elevated process. Inspection and journal features are read-only. The new runtime management buttons explicitly request authorized D-Bus operations only after user confirmation. The system manager uses the system bus; the user manager uses the session bus. Error messages may reflect local systemd or D-Bus configuration.
 
-The maintainer has confirmed the service table, Overview, Inspector and journal viewer working on Fedora in screenshots. Runtime service actions and expanded lifecycle journal matching still require hands-on Fedora validation.
+The maintainer has confirmed the service table, Overview, Inspector and journal viewer working on Fedora in screenshots. A disposable user service demonstrated successful Restart and Stop operations on Fedora. Stopping it also reproduced systemd's normal unit-unload behavior, which this update handles. Start-after-stop, system-manager Polkit authorization and expanded journal matching still need Fedora validation.
 
 ## Roadmap
 

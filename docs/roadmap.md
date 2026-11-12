@@ -8,7 +8,8 @@
 - [x] Loaded service table, system/user scope, search, and manual refresh
 - [x] Pure-Python normalization tests
 - [ ] Fedora Workstation integration validation
-- [ ] Expand unit-file reconciliation to installed-but-unloaded services
+- [x] Reconcile installed unit files with loaded units
+- [ ] Validate unloaded-unit handling on the maintainer's Fedora desktop
 
 ## Phase 2: Accurate inspection (in progress)
 
@@ -17,7 +18,7 @@
 - [x] Active/inactive/failed status icons, summary counts, quick filters, and sortable columns
 - [x] Pure-Python detail display tests
 - [ ] Fedora desktop integration validation of inspector and filters
-- [ ] Installed-but-unloaded service discovery
+- [x] Installed-but-unloaded service discovery and inspection
 - [ ] Signal-driven updates with limited fallback polling
 - [ ] D-Bus error/permission integration tests
 
@@ -27,7 +28,8 @@
 - [x] Existing systemd/Polkit authorization integration
 - [x] JobRemoved correlation and unknown-outcome timeout handling
 - [x] Conservative runtime action policy and pure-Python tests
-- [ ] Fedora manual validation using disposable units (required before release)
+- [x] Disposable user-unit Restart and Stop demonstrated on Fedora
+- [ ] Test Start after unload and system-manager Polkit authorization
 - [ ] Enable/Disable and Mask/Unmask (separate authorized file operations)
 - [ ] More comprehensive dependency-impact previews
 
