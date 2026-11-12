@@ -10,6 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GObject, Gtk, Pango  # noqa: E402
 
 from serviceforge.backend.systemd_client import SystemdClient
+from serviceforge.backend.live_monitor import LiveMonitor
 from serviceforge.backend.service_actions import ServiceActions
 from serviceforge.backend.unit_file_actions import UnitFileActions
 from serviceforge.models.actions import (
@@ -18,6 +19,7 @@ from serviceforge.models.actions import (
 from serviceforge.models.details import ServiceDetails
 from serviceforge.models.service import ServiceRecord
 from serviceforge.models.overview import summarize_services
+from serviceforge.models.monitoring import ActivityEvent, ActivityFeed
 from serviceforge.models.unit_files import (
     FileActionOutcome, file_action_allowed, file_action_message,
     requires_typed_confirmation,
@@ -63,6 +65,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_request_id = 0
         self._current_record: ServiceRecord | None = None
         self._store = Gio.ListStore.new(ServiceItem)
+        self._activity_feeds = {
+            "system": ActivityFeed(), "user": ActivityFeed(),
+        }
+        self._monitor = LiveMonitor(
+            self._on_monitor_refresh,
+            self._on_monitor_activity,
+            self._on_monitor_status,
+        )
 
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
@@ -89,10 +99,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_back.connect("clicked", self._on_back_clicked)
         self._detail_refresh.connect("clicked", self._on_detail_refresh_clicked)
         self._overview_button.connect("clicked", self._on_overview_clicked)
+        self._live_button.connect("toggled", self._on_live_toggled)
         self._logs_button.connect("clicked", self._on_logs_clicked)
         self.connect("close-request", self._on_window_close)
         self._on_selected_changed()
         self.refresh()
+        self._monitor.start("system")
 
     def _create_explorer(self) -> Adw.ToolbarView:
         toolbar = Adw.ToolbarView()
@@ -114,6 +126,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
         self._refresh.set_tooltip_text("Refresh services and unit files")
         header.pack_end(self._refresh)
+
+        self._live_button = Gtk.ToggleButton(label="Live")
+        self._live_button.set_active(True)
+        self._live_button.set_tooltip_text(
+            "Toggle automatic monitoring for the selected systemd manager"
+        )
+        header.pack_end(self._live_button)
         toolbar.add_top_bar(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -179,6 +198,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._summary.add_css_class("dim-label")
         content.append(self._summary)
 
+        self._monitor_status = Gtk.Label(xalign=0)
+        self._monitor_status.set_wrap(True)
+        self._monitor_status.add_css_class("dim-label")
+        self._monitor_status.set_text("Connecting to systemd events…")
+        content.append(self._monitor_status)
+
         toolbar.set_content(content)
         return toolbar
 
@@ -225,6 +250,9 @@ class MainWindow(Adw.ApplicationWindow):
                     label.add_css_class("error")
                 elif record.active_state == "inactive":
                     image.set_from_icon_name("media-playback-pause-symbolic")
+                    label.add_css_class("dim-label")
+                elif not record.loaded:
+                    image.set_from_icon_name("media-playback-stop-symbolic")
                     label.add_css_class("dim-label")
                 else:
                     image.set_from_icon_name("dialog-question-symbolic")
@@ -417,8 +445,37 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_selected_changed(self, *_args: object) -> None:
         self._inspect_button.set_sensitive(self._selection.get_selected_item() is not None)
 
+    def _selected_scope(self) -> str:
+        return "system" if self._scope.get_selected() == 0 else "user"
+
+    def _on_monitor_refresh(self) -> None:
+        self.refresh()
+
+    def _on_monitor_activity(self, event: ActivityEvent) -> None:
+        self._activity_feeds[event.scope].add(event)
+        if event.scope == self._selected_scope():
+            self._overview.set_activity(
+                self._activity_feeds[event.scope].recent(),
+            )
+
+    def _on_monitor_status(self, message: str) -> None:
+        self._monitor_status.set_text(message)
+        self._overview.set_monitor_status(message)
+
+    def _on_live_toggled(self, button: Gtk.ToggleButton) -> None:
+        if button.get_active():
+            self._monitor.start(self._selected_scope())
+            self.refresh()
+        else:
+            self._monitor.stop()
+
     def _on_scope_changed(self, *_args: object) -> None:
         self._on_back_clicked()
+        scope = self._selected_scope()
+        self._overview.set_activity(self._activity_feeds[scope].recent())
+        self._monitor.stop()
+        if self._live_button.get_active():
+            self._monitor.start(scope)
         self.refresh()
 
     def _on_refresh_clicked(self, *_args: object) -> None:
@@ -451,6 +508,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("inspector")
 
     def _on_window_close(self, *_args: object) -> bool:
+        self._monitor.stop()
         self._journal.close()
         self._journal.shutdown()
         return False
