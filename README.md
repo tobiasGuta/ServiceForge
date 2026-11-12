@@ -2,7 +2,7 @@
 
 **ServiceForge** is an early-stage native GNOME application for inspecting systemd services on Fedora Linux.
 
-> **Status: experimental development preview.** The application explores loaded services, displays an Overview, inspects unit properties, and reads accessible journal entries. It now also includes *opt-in* Start, Stop, Restart and Reload actions for eligible loaded services. These actions change service runtime state; test only on disposable units before relying on them.
+> **Status: experimental development preview.** ServiceForge explores loaded and installed services, displays an Overview, inspects properties, and reads accessible journal messages. It supports confirmed runtime actions plus persistent Enable/Disable/Mask/Unmask where systemd's unit-file state permits them. Test administrative actions on disposable services before relying on them.
 
 ## Features in the current development preview
 
@@ -19,7 +19,10 @@
 - Explicitly confirmed Start, Stop, Restart, and Reload runtime controls when eligible.
 - Systemd D-Bus job tracking: an action is not marked successful when merely queued.
 - Existing systemd/Polkit authorization; no root GUI or custom privileged helper.
-- Enable/Disable and Mask/Unmask are **not yet implemented**.
+- **Separate startup configuration controls:** persistent Enable, Disable, Mask and Unmask with no forced file replacement.
+- Fresh unit-file state validation before and after each file operation; uncertain outcomes are not reported as verified.
+- Typed service-name confirmation for system-wide changes and Mask/Unmask.
+- Intentionally conservative restrictions for protected system units, special unit-file states, and masking active units.
 
 The service list merges currently loaded units with installed service unit files, even after systemd unloads stopped services. Unloaded entries show **unloaded** and an **unknown** runtime state; their last active status is not invented. Bare templates without an instance are excluded. The Overview dashboard still counts **loaded units only**.
 
@@ -40,9 +43,16 @@ From the service table, click **Overview** for the dashboard. To inspect a unit,
 
 For a safe hands-on test, follow [the disposable user-service test guide](docs/testing.md).
 
-Inside the Inspector, eligible loaded services show **Start**, **Stop**, **Restart**, and sometimes **Reload**. Reload is only offered if the service's `Unit.CanReload` is true. Buttons require refreshed service details, and **every operation requires confirmation**. Critical services receive additional warnings. System services may prompt for Polkit authentication. ServiceForge tracks systemd's `JobRemoved` result and refreshes the unit; it does not assume queueing is success.
+Inside the Inspector, two independent control groups are available:
 
-**For your first test use a disposable service you created**, not NetworkManager, SSH, your display manager, logind, auditing, or other critical system components. Stop/restart can interrupt dependent services. This release has not yet been tested for live write operations on the maintainer's Fedora laptop. For systemd and Polkit semantics, see `docs/security-model.md`.
+- **Runtime controls:** Start, Stop, Restart and Reload (the latter only with `Unit.CanReload=true`). Runtime changes affect running state and are tracked with `JobRemoved`.
+- **Startup configuration:** Enable, Disable, Mask and Unmask. These change unit-file configuration **persistently** and do not automatically start/stop any service. They require a real installed file, supported file state and fresh revalidation. Masking is offered only to disabled, inactive units. Protected core system units and uncommon file states are deliberately excluded.
+
+Every operation requires confirmation. System-wide changes and Mask/Unmask also require typing the exact unit name. System-manager operations may prompt for Polkit authentication, or be denied by local policy. The application never runs as root or overwrites existing unit-file links with `force=true`.
+
+**For testing, use only disposable services you created**, not NetworkManager, SSH, display management, logind, auditing, or other essential components. The maintainer's screenshots verified user-service Stop, Restart and Start, including a stopped unit being unloaded and later started again. Persistent file changes and system-manager Polkit prompting have **not yet been manually validated on Fedora**.
+
+Follow [unit-file action testing](docs/unit-file-testing.md) and [system-service Polkit testing](docs/authorization-testing.md). The [runtime testing guide](docs/testing.md) remains available.
 
 The journal viewer uses native `python3-systemd` bindings. It reads **up to 200 matching entries from the current boot**, not a live stream or full history. It now also matches selected systemd-manager lifecycle messages about units (such as messages tagged `UNIT` or `USER_UNIT`), rather than requiring a unit process itself to log. Journal permissions and missing fields can limit what appears. If journal support is not installed, the service explorer still works and the Logs view shows an error. No process is started with `sudo`.
 
@@ -73,13 +83,13 @@ Use a regular user account. Do not run the GUI with `sudo`.
 
 ServiceForge is not an elevated process. Inspection and journal features are read-only. The new runtime management buttons explicitly request authorized D-Bus operations only after user confirmation. The system manager uses the system bus; the user manager uses the session bus. Error messages may reflect local systemd or D-Bus configuration.
 
-The maintainer has confirmed the service table, Overview, Inspector and journal viewer working on Fedora in screenshots. A disposable user service demonstrated successful Restart and Stop operations on Fedora. Stopping it also reproduced systemd's normal unit-unload behavior, which this update handles. Start-after-stop, system-manager Polkit authorization and expanded journal matching still need Fedora validation.
+The maintainer has confirmed the service table, Overview, Inspector and journal viewer working on Fedora in screenshots. A disposable user service demonstrated successful Restart, Stop and Start-after-stop operations on Fedora, including the systemd unloaded-unit lifecycle. Its journal also displayed genuine manager start/stop messages. Persistent Enable/Disable/Mask/Unmask and system-manager Polkit authentication remain to be manually tested on Fedora using the separate disposable unit guides.
 
 ## Roadmap
 
 1. Read-only explorer, inspector, overview, and recent journal history (current; desktop validation pending).
 2. Robust installed-unit discovery, real-time notifications, and live journal streaming.
-3. Test Start/Stop/Restart/Reload authorization and job tracking against disposable units; then add Enable/Disable/Mask/Unmask.
+3. Validate new persistent Enable/Disable/Mask/Unmask actions and Polkit denial/prompt behavior against disposable user/system test units.
 4. More advanced dependency, performance, and security inspection.
 5. Tests, accessibility, packaging, and releases.
 

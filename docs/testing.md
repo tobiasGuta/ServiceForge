@@ -80,3 +80,7 @@ pass.
 This test validates user-manager runtime actions. System-manager Polkit
 integration must be tested separately against an equally disposable system
 unit, with explicit attention to its security effects.
+
+For persistent unit-file operations on a service that supports `[Install]`,
+use [unit-file testing](unit-file-testing.md). To verify system-scope Polkit
+authentication and denial, use [authorization testing](authorization-testing.md).

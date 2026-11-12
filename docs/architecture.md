@@ -111,3 +111,23 @@ Unloaded entries have no observed `ActiveState`; they are marked
 `unloaded/unknown`, not assumed inactive. The Overview continues to count
 loaded units only. The explorer's All/Loaded/Unloaded filters distinguish
 these populations.
+
+## Persistent unit-file action boundary
+
+The `models.unit_files` policy defines conservative eligibility and
+persistent-state confirmation text. `backend.unit_file_actions` performs
+`GetUnitFileState` preflight, then one of `EnableUnitFiles`,
+`DisableUnitFiles`, `MaskUnitFiles`, `UnmaskUnitFiles`, followed
+by `GetUnitFileState` postflight. It never calls a runtime job method,
+nor `Manager.Reload` without an explicit separate request.
+
+All writes use `ALLOW_INTERACTIVE_AUTHORIZATION` to let systemd consult
+Polkit, with a longer timeout for an authentication prompt. File changes
+use `runtime=false` and `force=false` and carry exact unit names rather
+than user-supplied absolute paths.
+
+The Inspector has separate runtime and startup controls. It fetches fresh
+file state independently of unit property inspection, so Unmask can still
+be offered if a masked unit fails normal unit property inspection. Advanced
+execution and dependency panels are collapsed by default. The UI never
+treats a successful file change as confirmation a service started/stopped.

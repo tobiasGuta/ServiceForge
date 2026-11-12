@@ -29,8 +29,11 @@
 - [x] JobRemoved correlation and unknown-outcome timeout handling
 - [x] Conservative runtime action policy and pure-Python tests
 - [x] Disposable user-unit Restart and Stop demonstrated on Fedora
-- [ ] Test Start after unload and system-manager Polkit authorization
-- [ ] Enable/Disable and Mask/Unmask (separate authorized file operations)
+- [x] Start verified after unloaded user-unit Stop on Fedora
+- [x] Implement persistent Enable/Disable/Mask/Unmask with fresh-state checks and manual confirmations
+- [x] Mock authorization-denied and stale-state behavior in Fedora CI
+- [ ] Manually validate persistent file actions on disposable user test unit
+- [ ] Test system-manager Polkit authorization and denial using disposable system unit
 - [ ] More comprehensive dependency-impact previews
 
 ## Phase 4: Diagnostics (begun early, read-only)
@@ -40,7 +43,7 @@
 - [x] Local severity filtering, text search and explicit copy action
 - [x] Journal reader pure-Python tests using a fake Reader
 - [x] Expand journal matches with selected manager lifecycle entries
-- [ ] Fedora desktop validation for Overview and Logs
+- [x] Fedora desktop validation of Overview and Logs (screenshots)
 - [ ] Live journal streaming and richer matching of manager-generated unit messages
 - [ ] Resource accounting where available
 - [ ] Security hardening assessments and boot diagnostics
