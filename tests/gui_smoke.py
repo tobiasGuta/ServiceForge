@@ -62,6 +62,8 @@ def run() -> None:
     assert window._action_buttons["start"].get_sensitive()
     assert not window._action_buttons["stop"].get_sensitive()
     assert not window._action_buttons["restart"].get_sensitive()
+    assert len(window._file_buttons) == 4
+    assert not window._file_buttons["mask"].get_sensitive()
 
     active_record = ServiceRecord(
         scope="system",
@@ -103,8 +105,57 @@ def run() -> None:
     assert window._action_buttons["start"].get_sensitive()
     assert not window._action_buttons["stop"].get_sensitive()
     assert not window._action_buttons["restart"].get_sensitive()
+
+    # Simulate a stopped service with a real installed unit-file entry.
+    file_record = ServiceRecord(
+        scope="user",
+        name="serviceforge-config-test.service",
+        description="Startup configuration smoke test",
+        load_state="loaded",
+        active_state="inactive",
+        sub_state="dead",
+        unit_file_state="disabled",
+        unit_file_path=(
+            "/home/example/.local/share/systemd/user/"
+            "serviceforge-config-test.service"
+        ),
+    )
+    details = ServiceDetails(
+        scope="user",
+        requested_name=file_record.name,
+        unit={
+            "Id": file_record.name,
+            "Description": file_record.description,
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "SubState": "dead",
+            "UnitFileState": "disabled",
+            "CanStart": True,
+            "CanStop": True,
+        },
+        service={"Type": "simple"},
+    )
+    window._current_record = file_record
+    with patch.object(
+        window._client, "fetch_details",
+        side_effect=lambda _scope, _name, success, _error, **_kw: success(details),
+    ), patch.object(
+        window._file_client, "get_state",
+        side_effect=lambda _scope, _name, success, _error: success("disabled"),
+    ):
+        window._load_details(file_record)
+
+    assert window._file_buttons["enable"].get_sensitive()
+    assert window._file_buttons["mask"].get_sensitive()
+    assert not window._file_buttons["disable"].get_sensitive()
+    assert not window._file_buttons["unmask"].get_sensitive()
+
+    first = window._detail_groups.get_first_child()
+    assert first.get_expanded()
+    second = first.get_next_sibling()
+    assert not second.get_expanded()
     window.destroy()
-    print("GTK overview, journal and management controls constructed successfully")
+    print("GTK overview, journal, Inspector and file controls constructed successfully")
 
 
 if __name__ == "__main__":
