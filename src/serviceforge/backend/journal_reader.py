@@ -28,8 +28,9 @@ def read_journal(
 ) -> list[JournalEntry]:
     """Return up to *limit* readable messages for this boot in chronological order.
 
-    A user manager's unit is matched by _SYSTEMD_USER_UNIT and _UID, not by the
-    global _SYSTEMD_UNIT field. No shell is used, no permissions are changed.
+    Matches messages emitted by the service plus selected systemd manager
+    messages about the service, similar to journalctl -u/--user-unit.
+    The query still observes journal access permissions.
     """
     if scope not in ("system", "user"):
         raise ValueError("Invalid manager scope")
@@ -55,10 +56,20 @@ def read_journal(
     try:
         reader.this_boot()
         if scope == "system":
+            # Branch 1: messages emitted by the unit itself.
             reader.add_match(_SYSTEMD_UNIT=unit_name)
+            # Branch 2: PID 1 logging about the unit.
+            reader.add_disjunction()
+            reader.add_match(UNIT=unit_name, _PID="1")
+            # Branch 3: manager-referenced object unit.
+            reader.add_disjunction()
+            reader.add_match(OBJECT_SYSTEMD_UNIT=unit_name, _UID="0")
         else:
-            reader.add_match(_SYSTEMD_USER_UNIT=unit_name)
-            reader.add_match(_UID=str(os.getuid() if uid is None else uid))
+            current_uid = str(os.getuid() if uid is None else uid)
+            reader.add_match(_SYSTEMD_USER_UNIT=unit_name, _UID=current_uid)
+            # User manager lifecycle messages about the unit.
+            reader.add_disjunction()
+            reader.add_match(USER_UNIT=unit_name, _UID=current_uid)
         reader.seek_tail()
         entries: list[JournalEntry] = []
         for _ in range(limit):

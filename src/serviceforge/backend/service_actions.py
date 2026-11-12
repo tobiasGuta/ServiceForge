@@ -56,6 +56,7 @@ class ServiceActions:
             job_path: str | None = None
             early_results: dict[str, str] = {}
             finished = False
+            subscribed_to_manager = False
 
             def finish_error(message: str) -> None:
                 nonlocal finished
@@ -80,10 +81,11 @@ class ServiceActions:
                     connection.signal_unsubscribe(subscription_id)
                 # Only one service operation can be in progress in this client.
                 # Unsubscribe asynchronously; GUI must not wait on it.
-                connection.call(
-                    BUS_NAME, MANAGER_PATH, MANAGER_INTERFACE, "Unsubscribe",
-                    None, None, Gio.DBusCallFlags.NONE, 5000, None, None, None,
-                )
+                if subscribed_to_manager:
+                    connection.call(
+                        BUS_NAME, MANAGER_PATH, MANAGER_INTERFACE, "Unsubscribe",
+                        None, None, Gio.DBusCallFlags.NONE, 5000, None, None, None,
+                    )
                 self._in_progress = False
 
             def on_job_removed(
@@ -110,6 +112,8 @@ class ServiceActions:
 
             def queued(reply: GLib.Variant) -> None:
                 nonlocal job_path
+                if finished:
+                    return
                 value = reply.unpack()
                 if len(value) != 1 or not isinstance(value[0], str):
                     finish_error("systemd returned an invalid job path.")
@@ -119,7 +123,10 @@ class ServiceActions:
                     finish_result(early_results[job_path])
 
             def subscribed(_reply: GLib.Variant) -> None:
-                nonlocal subscription_id, timeout_id
+                nonlocal subscription_id, timeout_id, subscribed_to_manager
+                if finished:
+                    return
+                subscribed_to_manager = True
                 subscription_id = connection.signal_subscribe(
                     BUS_NAME, MANAGER_INTERFACE, "JobRemoved", MANAGER_PATH,
                     None, Gio.DBusSignalFlags.NONE, on_job_removed, None,

@@ -196,8 +196,11 @@ class JournalView(Gtk.Box):
         if not self._spinner.get_visible():
             if not self._entries:
                 self._status.set_text(
-                    "No readable messages matched this service in the current boot. "
-                    "Some system journal entries may require additional permissions."
+                    "No matching journal entries are accessible for this service "
+                    "in the current boot. The service may be quiet, not have "
+                    "run yet, or its messages may require additional journal "
+                    "permissions. Try another service, or check a different boot "
+                    "using journalctl outside ServiceForge."
                 )
             else:
                 self._status.set_text(

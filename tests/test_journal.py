@@ -19,6 +19,7 @@ from serviceforge.models.journal import (  # noqa: E402
 class FakeReader:
     def __init__(self):
         self.matches = []
+        self.disjunctions = 0
         self.seen_boot = False
         self.seen_tail = False
         self.closed = False
@@ -32,6 +33,9 @@ class FakeReader:
 
     def add_match(self, **fields):
         self.matches.append(fields)
+
+    def add_disjunction(self):
+        self.disjunctions += 1
 
     def seek_tail(self):
         self.seen_tail = True
@@ -47,7 +51,12 @@ class JournalTests(unittest.TestCase):
     def test_system_match_and_order(self):
         reader = FakeReader()
         entries = read_journal("system", "sshd.service", reader_factory=lambda: reader)
-        self.assertEqual(reader.matches, [{"_SYSTEMD_UNIT": "sshd.service"}])
+        self.assertEqual(reader.matches, [
+            {"_SYSTEMD_UNIT": "sshd.service"},
+            {"UNIT": "sshd.service", "_PID": "1"},
+            {"OBJECT_SYSTEMD_UNIT": "sshd.service", "_UID": "0"},
+        ])
+        self.assertEqual(reader.disjunctions, 2)
         self.assertTrue(reader.seen_boot and reader.seen_tail and reader.closed)
         self.assertEqual([e.message for e in entries], ["old entry", "new entry"])
 
@@ -55,9 +64,10 @@ class JournalTests(unittest.TestCase):
         reader = FakeReader()
         read_journal("user", "example.service", reader_factory=lambda: reader, uid=1001)
         self.assertEqual(reader.matches, [
-            {"_SYSTEMD_USER_UNIT": "example.service"},
-            {"_UID": "1001"},
+            {"_SYSTEMD_USER_UNIT": "example.service", "_UID": "1001"},
+            {"USER_UNIT": "example.service", "_UID": "1001"},
         ])
+        self.assertEqual(reader.disjunctions, 1)
 
     def test_invalid_names_never_open_reader(self):
         for unit in ("../x.service", "name\n.service", "x.timer"):
