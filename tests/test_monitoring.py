@@ -77,6 +77,14 @@ class ActivityTests(unittest.TestCase):
             (1, "/", "test.service", "done"),
         ))
         self.assertFalse(should_refresh_for_signal(
+            MANAGER, "UnitNew", "/org/freedesktop/systemd1",
+            ("test.timer", UNIT_PATH),
+        ))
+        self.assertFalse(should_refresh_for_signal(
+            MANAGER, "JobRemoved", "/org/freedesktop/systemd1",
+            (1, "/", "test.timer", "done"),
+        ))
+        self.assertFalse(should_refresh_for_signal(
             MANAGER, "Reloading", "/org/freedesktop/systemd1", (True,),
         ))
 

@@ -86,10 +86,23 @@ def should_refresh_for_signal(
 ) -> bool:
     """Filter relevant notifications; ignore noisy unrelated properties."""
     if interface == "org.freedesktop.systemd1.Manager":
-        return signal in (
-            "UnitNew", "UnitRemoved", "JobRemoved",
-            "UnitFilesChanged",
-        ) or (signal == "Reloading" and tuple(values) == (False,))
+        # This is a service explorer; timer, mount, and device churn must not
+        # trigger full service-list reads on busy machines.
+        if signal in ("UnitNew", "UnitRemoved"):
+            return bool(
+                len(values) == 2
+                and isinstance(values[0], str)
+                and values[0].endswith(".service")
+            )
+        if signal == "JobRemoved":
+            return bool(
+                len(values) == 4
+                and isinstance(values[2], str)
+                and values[2].endswith(".service")
+            )
+        return signal == "UnitFilesChanged" or (
+            signal == "Reloading" and tuple(values) == (False,)
+        )
 
     if (
         interface != "org.freedesktop.DBus.Properties"
