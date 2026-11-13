@@ -20,7 +20,8 @@ class FakeReader:
     def __init__(self):
         self.matches = []
         self.disjunctions = 0
-        self.seen_boot = False
+        self.boot_id = None
+        self.operations = []
         self.seen_tail = False
         self.closed = False
         self.rows = [
@@ -28,14 +29,20 @@ class FakeReader:
             {"MESSAGE": "old entry", "PRIORITY": "6"},
         ]
 
-    def this_boot(self):
-        self.seen_boot = True
+    def this_boot(self, boot_id=None):
+        self.boot_id = boot_id
+        self.operations.append("boot")
 
     def add_match(self, **fields):
         self.matches.append(fields)
+        self.operations.append("match")
 
     def add_disjunction(self):
         self.disjunctions += 1
+        self.operations.append("or")
+
+    def add_conjunction(self):
+        self.operations.append("and")
 
     def seek_tail(self):
         self.seen_tail = True
@@ -57,17 +64,30 @@ class JournalTests(unittest.TestCase):
             {"OBJECT_SYSTEMD_UNIT": "sshd.service", "_UID": "0"},
         ])
         self.assertEqual(reader.disjunctions, 2)
-        self.assertTrue(reader.seen_boot and reader.seen_tail and reader.closed)
+        self.assertTrue(reader.seen_tail and reader.closed)
+        self.assertEqual(reader.operations, ["boot", "and", "match", "or", "match", "or", "match"])
         self.assertEqual([e.message for e in entries], ["old entry", "new entry"])
 
     def test_user_match_includes_uid(self):
         reader = FakeReader()
-        read_journal("user", "example.service", reader_factory=lambda: reader, uid=1001)
+        previous_boot = "a" * 32
+        read_journal(
+            "user", "example.service", reader_factory=lambda: reader, uid=1001,
+            boot_id=previous_boot,
+        )
         self.assertEqual(reader.matches, [
             {"_SYSTEMD_USER_UNIT": "example.service", "_UID": "1001"},
             {"USER_UNIT": "example.service", "_UID": "1001"},
         ])
         self.assertEqual(reader.disjunctions, 1)
+        self.assertEqual(reader.boot_id, previous_boot)
+        self.assertEqual(reader.operations, ["boot", "and", "match", "or", "match"])
+
+    def test_failure_preview_filters_before_limiting_rows(self):
+        reader = FakeReader()
+        read_journal("system", "example.service", reader_factory=lambda: reader, max_priority=3)
+        self.assertEqual(reader.operations[-5:], ["and", "match", "match", "match", "match"])
+        self.assertEqual(reader.matches[-4:], [{"PRIORITY": str(i)} for i in range(4)])
 
     def test_invalid_names_never_open_reader(self):
         for unit in ("../x.service", "name\n.service", "x.timer"):

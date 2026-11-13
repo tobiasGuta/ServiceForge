@@ -117,7 +117,7 @@ def exercise_monitor():
         live_monitor.GLib, "source_remove", side_effect=timers.remove,
     ):
         monitor = LiveMonitor(
-            lambda: refreshes.append(True),
+            refreshes.append,
             events.append, statuses.append,
         )
         monitor.start("user")
@@ -142,21 +142,23 @@ def exercise_monitor():
                 ),
             ),
         )
-        connection.emit(
-            MANAGER, "UnitFilesChanged", PATH,
-            GLib.Variant("()", ()),
-        )
-        assert len(events) == 2, events
+        assert len(events) == 1, events
         assert events[0].unit == "example.service"
-        # Three relevant events cause exactly one debounced refresh.
+        # The job and property change share one targeted refresh.
         bursts = [
             ident for ident, item in timers.scheduled.items()
             if item[0] == 750
         ]
         assert len(bursts) == 1
         timers.fire(bursts[0])
-        assert len(refreshes) == 1
+        assert refreshes == [{"example.service", UNIT_PATH}]
         assert all(item[0] != 750 for item in timers.scheduled.values())
+
+        connection.emit(
+            MANAGER, "UnitFilesChanged", PATH, GLib.Variant("()", ()),
+        )
+        timers.fire(next(ident for ident, item in timers.scheduled.items() if item[0] == 750))
+        assert refreshes[-1] is None
 
         # Ignore timer units and manager reload beginning.
         connection.emit(
@@ -186,7 +188,7 @@ def exercise_monitor():
             "UnitFilesChanged", GLib.Variant("()", ()), None,
         )
         assert len(events) == 2  # no callbacks after Stop
-        assert len(refreshes) == 1
+        assert len(refreshes) == 2
 
 
 def exercise_subscription_failure():
@@ -212,7 +214,7 @@ def exercise_subscription_failure():
         live_monitor.GLib, "source_remove", side_effect=timers.remove,
     ):
         monitor = LiveMonitor(
-            lambda: refreshes.append(True), lambda _: None, statuses.append,
+            refreshes.append, lambda _: None, statuses.append,
         )
         monitor.start("system")
         assert not connection.handlers
@@ -221,7 +223,7 @@ def exercise_subscription_failure():
         fallback_id = next(iter(timers.scheduled))
         assert timers.scheduled[fallback_id][0] == 45000
         assert timers.fire(fallback_id) == GLib.SOURCE_CONTINUE
-        assert len(refreshes) == 1
+        assert refreshes == [None]
         monitor.stop()
         assert connection.unsubscribe_calls == 0
 

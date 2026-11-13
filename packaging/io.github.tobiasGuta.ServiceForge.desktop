@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ServiceForge
+Comment=Inspect and troubleshoot systemd services
+Exec=serviceforge
+Icon=applications-system-symbolic
+Terminal=false
+Categories=System;Monitor;
+Keywords=systemd;service;journal;logs;
+StartupNotify=true

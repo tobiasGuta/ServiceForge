@@ -163,6 +163,7 @@ class SystemdClient:
                                 requested_name=name,
                                 unit=unit_props,
                                 service=unpack_properties(reply_service),
+                                object_path=path,
                             )
                         )
 
@@ -174,6 +175,7 @@ class SystemdClient:
                                 unit=unit_props,
                                 service={},
                                 service_warning=message,
+                                object_path=path,
                             )
                         )
 

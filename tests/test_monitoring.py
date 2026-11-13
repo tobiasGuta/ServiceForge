@@ -64,6 +64,10 @@ class ActivityTests(unittest.TestCase):
             PROPS, "PropertiesChanged", UNIT_PATH,
             ("org.freedesktop.systemd1.Unit", {"ActiveState": "failed"}, []),
         ))
+        self.assertTrue(should_refresh_for_signal(
+            PROPS, "PropertiesChanged", UNIT_PATH,
+            ("org.freedesktop.systemd1.Service", {}, ["ExecMainStatus"]),
+        ))
         self.assertFalse(should_refresh_for_signal(
             PROPS, "PropertiesChanged", UNIT_PATH,
             ("org.freedesktop.systemd1.Unit", {"Description": "text"}, []),

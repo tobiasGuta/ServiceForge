@@ -29,9 +29,9 @@ jobs:
     container:
       image: fedora:${{ matrix.fedora }}
     steps:
-      - uses: actions/checkout@v4
       - name: Install native Fedora dependencies
-        run: dnf install -y python3 python3-gobject gtk4 libadwaita python3-systemd xorg-x11-server-Xvfb
+        run: dnf install -y git rpm-build python3-devel pyproject-rpm-macros python3-setuptools python3-wheel desktop-file-utils python3-gobject gtk4 libadwaita python3-systemd systemd-journal-remote xorg-x11-server-Xvfb
+      - uses: actions/checkout@v4
       - name: Import GTK application and journal backend
         run: |
           PYTHONPATH=src python3 -c "from serviceforge.ui.main_window import MainWindow; from serviceforge.ui.overview_view import OverviewView; from serviceforge.ui.journal_view import JournalView; from serviceforge.backend.journal_reader import read_journal; print('Native imports OK')"
@@ -48,6 +48,24 @@ jobs:
         run: PYTHONPATH=src python3 tests/monitor_smoke.py
       - name: Check mocked persistent unit-file actions and Polkit denial
         run: PYTHONPATH=src python3 tests/unit_file_actions_smoke.py
+      - name: Check native journal filtering across boots
+        run: PYTHONPATH=src python3 tests/journal_smoke.py
       - name: Run pure-Python tests
         run: python3 -m unittest discover -s tests -v
+      - name: Build and install the preview RPM
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          rpmdir=$(mktemp -d)
+          mkdir -p "$rpmdir/SOURCES"
+          git -c safe.directory="$PWD" archive --format=tar.gz --prefix="ServiceForge-$version/" -o "$rpmdir/SOURCES/ServiceForge-$version.tar.gz" HEAD
+          rpmbuild -ba --define "_topdir $rpmdir" packaging/serviceforge.spec
+          dnf install -y "$rpmdir"/RPMS/noarch/*.rpm
+          python3 -c 'from serviceforge.app import ServiceForgeApplication'
+          desktop-file-validate /usr/share/applications/io.github.tobiasGuta.ServiceForge.desktop
+          mkdir -p dist
+          cp "$rpmdir"/RPMS/noarch/*.rpm "$rpmdir"/SRPMS/*.src.rpm dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: serviceforge-fedora-${{ matrix.fedora }}
+          path: dist/*.rpm
       # Headless checks are not a substitute for Fedora desktop integration tests.

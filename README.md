@@ -1,8 +1,20 @@
 # ServiceForge
 
-**ServiceForge** is an early-stage native GNOME application for inspecting systemd services on Fedora Linux.
+**ServiceForge** is a native GNOME application for troubleshooting systemd services on Fedora. Find a failed system or user service, check its exit status, and read the journal for the boot when it failed.
 
-> **Status: experimental development preview.** ServiceForge explores loaded and installed services, displays an Overview, inspects properties, and reads accessible journal messages. It supports confirmed runtime actions plus persistent Enable/Disable/Mask/Unmask where systemd's unit-file state permits them. Test administrative actions on disposable services before relying on them.
+![The ServiceForge Inspector shows a sample failed user service, its exit status and recent journal errors.](docs/images/failure-inspector.png)
+
+## Install the Fedora preview
+
+Download the RPM for Fedora **44** or **45** from [GitHub Releases](https://github.com/tobiasGuta/ServiceForge/releases). From the download directory, install it with the command for your Fedora version:
+
+```bash
+sudo dnf install ./serviceforge-0.1.0-1.fc45.noarch.rpm
+```
+
+On Fedora 44, use the package ending in `fc44.noarch.rpm`. Open **ServiceForge** from the GNOME app launcher. Choose **Overview** to find failed services, then open one in the Inspector. Use **View journal** and the **Boot** selector to investigate older failures.
+
+> **Development preview.** Verify administrative actions with a disposable service before relying on them.
 
 ## Features in the current development preview
 
@@ -14,17 +26,18 @@
 - Read authoritative unit and service properties on demand, including unit-file path, PID, restart policy, execution commands, result, and dependencies.
 - Clear unavailable values and error/partial-result messages.
 - **Overview** page: loaded-service counts, installed-but-unloaded count, direct links to failed services, and an in-session feed of observed systemd manager events.
-- **Logs** view from the inspector: up to 200 readable journal entries from the current boot.
+- **Inspector:** live service properties, a last-checked time, and a failure summary with the result, exit status, restart count, and up to three recent error messages.
+- **Logs:** up to 200 readable journal entries from the selected boot, with the current boot selected by default.
 - Journal message search, severity filtering, refresh, and an explicit copy action.
 - Explicitly confirmed Start, Stop, Restart, and Reload runtime controls when eligible.
-- Systemd D-Bus job tracking: an action is not marked successful when merely queued.
+- Systemd D-Bus job tracking reports whether a runtime operation completed.
 - Existing systemd/Polkit authorization; no root GUI or custom privileged helper.
 - **Separate startup configuration controls:** persistent Enable, Disable, Mask and Unmask with no forced file replacement.
 - Fresh unit-file state validation before and after each file operation; uncertain outcomes are not reported as verified.
-- Typed service-name confirmation for system-wide changes and Mask/Unmask.
+- Typed service-name confirmation for persistent system-wide changes and Mask/Unmask.
 - Intentionally conservative restrictions for protected system units, special unit-file states, and masking active units.
 
-The service list merges currently loaded units with installed service unit files, even after systemd unloads stopped services. Unloaded entries show **unloaded** and an **unknown** runtime state; their last active status is not invented. Bare templates without an instance are excluded. The Overview dashboard still counts **loaded units only**.
+The service list merges currently loaded units with installed service unit files, even after systemd unloads stopped services. Unloaded entries show an **unknown** runtime state. Bare templates without an instance are excluded. Overview counts runtime states for loaded services and shows the installed-but-unloaded count separately.
 
 The Inspector uses `GetUnit` for loaded-only units and `LoadUnit` for known installed unit files. `LoadUnit` resolves configuration in systemd's memory without starting the service. It then reads `Unit` and `Service` properties. An unavailable or deleted file results in an actionable refresh message rather than a loop. Unit-file states with no exact match remain `Unknown`, never guessed as `disabled`.
 
@@ -43,7 +56,7 @@ From the service table, click **Overview** for the dashboard. To inspect a unit,
 
 The **Live** button is enabled by default. ServiceForge connects to the selected system/user manager using a **private D-Bus connection** (isolated from the D-Bus client used for management operations). It subscribes to loaded-unit changes, job results, unit-file changes and relevant property notifications. Multiple rapid signals trigger a single debounced refresh after roughly 750 ms. A reconciliation refresh occurs every 90 seconds to repair missed notifications.
 
-When event subscription is unavailable, the UI clearly reports the problem and uses a slower 45-second refresh. Turn Live off to stop both automatic refresh modes; manual refresh always remains available. Switching managers changes the subscription and activity feed to the chosen scope.
+Relevant job and property events also refresh the service open in the Inspector. When event subscription is unavailable, the app shows the reason and polls every 45 seconds. Turn Live off to pause automatic refresh. Switching managers clears the previous list while the new scope loads.
 
 The Overview's **Recent manager activity** shows at most 10 of the last 30 signals observed for that manager **during this app session**, not historical logs or an audit trail. Unit loaded/unloaded events describe systemd's memory only, not installed-unit presence or a successful service start. For historical diagnostics, continue using the Logs view. Signals never authorize or perform administrative actions.
 
@@ -58,13 +71,13 @@ Inside the Inspector, two independent control groups are available:
 - **Runtime controls:** Start, Stop, Restart and Reload (the latter only with `Unit.CanReload=true`). Runtime changes affect running state and are tracked with `JobRemoved`.
 - **Startup configuration:** Enable, Disable, Mask and Unmask. These change unit-file configuration **persistently** and do not automatically start/stop any service. They require a real installed file, supported file state and fresh revalidation. Masking is offered only to disabled, inactive units. Protected core system units and uncommon file states are deliberately excluded.
 
-Every operation requires confirmation. System-wide changes and Mask/Unmask also require typing the exact unit name. System-manager operations may prompt for Polkit authentication, or be denied by local policy. The application never runs as root or overwrites existing unit-file links with `force=true`.
+Every operation requires confirmation that identifies the target manager. Persistent system-wide changes and Mask/Unmask also require typing the exact unit name. System-manager operations may prompt for Polkit authentication or be denied by local policy.
 
 **For testing, use only disposable services you created**, not NetworkManager, SSH, display management, logind, auditing, or other essential components. The maintainer's screenshots verified user-service Stop, Restart and Start, including a stopped unit being unloaded and later started again. The maintainer has reported that persistent file changes and disposable system-manager authorization tests passed on Fedora. The specific authentication prompt behavior was not independently observed.
 
 Follow [unit-file action testing](docs/unit-file-testing.md) and [system-service Polkit testing](docs/authorization-testing.md). The [runtime testing guide](docs/testing.md) remains available.
 
-The journal viewer uses native `python3-systemd` bindings. It reads **up to 200 matching entries from the current boot**, not a live stream or full history. It now also matches selected systemd-manager lifecycle messages about units (such as messages tagged `UNIT` or `USER_UNIT`), rather than requiring a unit process itself to log. Journal permissions and missing fields can limit what appears. If journal support is not installed, the service explorer still works and the Logs view shows an error. No process is started with `sudo`.
+The journal viewer uses native `python3-systemd` bindings and includes selected systemd-manager lifecycle messages. The boot selector lists previous boots that are still retained and readable. Journal permissions and missing fields can limit what appears.
 
 Run pure-Python tests:
 
@@ -95,18 +108,16 @@ Use a regular user account. Do not run the GUI with `sudo`.
 
 ServiceForge is not an elevated process. Inspection and journal features are read-only. The new runtime management buttons explicitly request authorized D-Bus operations only after user confirmation. The system manager uses the system bus; the user manager uses the session bus. Error messages may reflect local systemd or D-Bus configuration.
 
-The maintainer has confirmed the service table, Overview, Inspector and journal viewer working on Fedora in screenshots. A disposable user service demonstrated successful Restart, Stop and Start-after-stop operations on Fedora, including the systemd unloaded-unit lifecycle. Its journal also displayed genuine manager start/stop messages. Persistent Enable/Disable/Mask/Unmask were verified using disposable user services on Fedora; the maintainer also reported successful disposable system-manager authorization tests. The additional non-forcing mask safety edge case is tracked separately in [Issue #4](https://github.com/tobiasGuta/ServiceForge/issues/4). New live monitoring still needs manual GNOME desktop validation.
+Live refresh, pause and resume, manager switching, and runtime job tracking were checked against a disposable user service on Fedora 45. The additional non-forcing mask edge case is tracked in [Issue #4](https://github.com/tobiasGuta/ServiceForge/issues/4).
 
 ## Roadmap
 
-1. Explorer, Inspector, Overview, and recent journal history (core user-service flows verified on Fedora).
-2. Live systemd manager monitoring (implemented; desktop validation pending), then live journal streaming.
-3. Further safety tests for unusual unit-file paths and Polkit policy variants.
-4. More advanced dependency, performance, and security inspection.
-5. Tests, accessibility, packaging, and releases.
+1. Live journal streaming and richer journal matching.
+2. Further integration tests for unusual unit-file paths and Polkit policy variants.
+3. Accessibility, dependency inspection, and resource accounting.
 
 See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [security model](docs/security-model.md).
 
 ## License
 
-The project's intended open-source license has not yet been finalized. Do not assume a license has been granted until a `LICENSE` file is published. A license decision is required before the first open-source release.
+Copyright © 2026 Tobias Guta. ServiceForge is free software under [GPL-3.0-or-later](LICENSE). You can use, study, modify, and share it under those terms.

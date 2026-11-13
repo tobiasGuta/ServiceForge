@@ -65,10 +65,27 @@ class ServiceDetails:
     unit: Mapping[str, Any]
     service: Mapping[str, Any]
     service_warning: str | None = None
+    object_path: str | None = None
 
     @property
     def display_name(self) -> str:
         return _string(self.unit.get("Id"), empty=self.requested_name)
+
+    @property
+    def failure_summary(self) -> str | None:
+        if self.unit.get("ActiveState") != "failed":
+            return None
+        result = _string(self.service.get("Result"))
+        code = self.service.get("ExecMainCode")
+        status = _numeric(self.service.get("ExecMainStatus"))
+        if code in (2, 3):
+            execution = f"Signal {status}" if status != NOT_AVAILABLE else status
+        elif code == 1:
+            execution = f"Exit status {status}" if status != NOT_AVAILABLE else status
+        else:
+            execution = "Exit status unavailable"
+        restarts = _numeric(self.service.get("NRestarts"))
+        return f"Result: {result} · {execution} · Restarts: {restarts}"
 
     def sections(self) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...]:
         """Generate human-readable rows without assuming absent values."""

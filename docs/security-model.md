@@ -21,7 +21,8 @@ of exploitable vulnerabilities.
 ## Current journal viewer
 
 - Journal reads are performed unprivileged with `python3-systemd` and limited
-  to 200 matching entries for the current boot per request.
+  to 200 matching entries for the selected boot per request. The Inspector
+  shows up to three recent errors from the current boot for failed services.
 - System service history matches `_SYSTEMD_UNIT`; user service history
   also constrains entries to the current process UID.
 - Journal access and visibility follow the operating system's existing

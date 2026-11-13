@@ -21,5 +21,9 @@ class ServiceRecord:
     unit_file_path: str | None = None
 
     @property
+    def scope_label(self) -> str:
+        return self.scope.capitalize()
+
+    @property
     def startup_display(self) -> str:
         return self.unit_file_state if self.unit_file_state is not None else "Unknown"
