@@ -1,6 +1,8 @@
 """Native service explorer with read-only diagnostics and confirmed actions."""
 
+from concurrent.futures import Future
 from dataclasses import replace
+from datetime import datetime
 
 import gi
 
@@ -10,6 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GObject, Gtk, Pango  # noqa: E402
 
 from serviceforge.backend.systemd_client import SystemdClient
+from serviceforge.backend.journal_reader import JournalClient
 from serviceforge.backend.live_monitor import LiveMonitor
 from serviceforge.backend.service_actions import ServiceActions
 from serviceforge.backend.unit_file_actions import UnitFileActions
@@ -17,7 +20,8 @@ from serviceforge.models.actions import (
     ActionOutcome, allowed_actions, confirmation_text,
 )
 from serviceforge.models.details import ServiceDetails
-from serviceforge.models.service import ServiceRecord
+from serviceforge.models.journal import JournalEntry
+from serviceforge.models.service import Scope, ServiceRecord
 from serviceforge.models.overview import summarize_services
 from serviceforge.models.monitoring import ActivityEvent, ActivityFeed
 from serviceforge.models.unit_files import (
@@ -55,6 +59,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._client = SystemdClient()
         self._actions_client = ServiceActions()
         self._file_client = UnitFileActions()
+        self._failure_journal = JournalClient()
+        self._failure_request: Future[list[JournalEntry]] | None = None
         self._detail_unit: ServiceDetails | None = None
         self._file_state: str | None = None
         self._file_state_request_id = 0
@@ -63,7 +69,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._file_buttons: dict[str, Gtk.Button] = {}
         self._request_id = 0
         self._detail_request_id = 0
+        self._inspector_session = 0
+        self._detail_refresh_pending = False
         self._current_record: ServiceRecord | None = None
+        self._closing = False
         self._store = Gio.ListStore.new(ServiceItem)
         self._activity_feeds = {
             "system": ActivityFeed(), "user": ActivityFeed(),
@@ -133,6 +142,11 @@ class MainWindow(Adw.ApplicationWindow):
             "Toggle automatic monitoring for the selected systemd manager"
         )
         header.pack_end(self._live_button)
+        menu = Gio.Menu()
+        menu.append("About ServiceForge", "app.about")
+        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        menu_button.set_tooltip_text("Main menu")
+        header.pack_end(menu_button)
         toolbar.add_top_bar(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -285,15 +299,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_back = Gtk.Button.new_from_icon_name("go-previous-symbolic")
         self._detail_back.set_tooltip_text("Back to services")
         header.pack_start(self._detail_back)
-        self._detail_title = Gtk.Label(label="Service Inspector")
-        self._detail_title.add_css_class("title")
-        self._detail_title.set_ellipsize(Pango.EllipsizeMode.END)
+        self._detail_title = Adw.WindowTitle(title="Service Inspector")
         header.set_title_widget(self._detail_title)
         self._detail_refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
         self._detail_refresh.set_tooltip_text("Refresh selected service details")
         header.pack_end(self._detail_refresh)
         self._logs_button = Gtk.Button(label="Logs")
-        self._logs_button.set_tooltip_text("Read this service's current-boot journal")
+        self._logs_button.set_tooltip_text("Read this service’s journal history")
         header.pack_end(self._logs_button)
         toolbar.add_top_bar(header)
 
@@ -306,6 +318,27 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_content.set_margin_bottom(24)
         self._detail_content.set_margin_start(24)
         self._detail_content.set_margin_end(24)
+
+        self._detail_checked = Gtk.Label(xalign=0)
+        self._detail_checked.add_css_class("dim-label")
+        self._detail_content.append(self._detail_checked)
+
+        self._failure_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._failure_panel.set_visible(False)
+        failure_title = Gtk.Label(label="Service failed", xalign=0)
+        failure_title.add_css_class("title-3")
+        self._failure_panel.append(failure_title)
+        self._failure_summary = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        self._failure_panel.append(self._failure_summary)
+        self._failure_logs = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        self._failure_logs.set_lines(7)
+        self._failure_logs.set_ellipsize(Pango.EllipsizeMode.END)
+        self._failure_panel.append(self._failure_logs)
+        view_logs = Gtk.Button(label="View journal")
+        view_logs.set_halign(Gtk.Align.START)
+        view_logs.connect("clicked", self._on_logs_clicked)
+        self._failure_panel.append(view_logs)
+        self._detail_content.append(self._failure_panel)
 
         runtime_title = Gtk.Label(label="Runtime controls", xalign=0)
         runtime_title.add_css_class("title-4")
@@ -445,11 +478,27 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_selected_changed(self, *_args: object) -> None:
         self._inspect_button.set_sensitive(self._selection.get_selected_item() is not None)
 
-    def _selected_scope(self) -> str:
+    def _selected_scope(self) -> Scope:
         return "system" if self._scope.get_selected() == 0 else "user"
 
-    def _on_monitor_refresh(self) -> None:
+    def _on_monitor_refresh(self, affected_units: set[str] | None) -> None:
         self.refresh()
+        record = self._current_record
+        if record is None or record.scope != self._selected_scope():
+            return
+        details = self._detail_unit
+        if affected_units is not None and not affected_units.intersection((
+            record.name, record.object_path,
+            details.object_path if details else None,
+            details.display_name if details else None,
+        )):
+            return
+        if self._action_pending:
+            return
+        if not self._detail_refresh.get_sensitive():
+            self._detail_refresh_pending = True
+            return
+        self._load_details(record)
 
     def _on_monitor_activity(self, event: ActivityEvent) -> None:
         self._activity_feeds[event.scope].add(event)
@@ -465,16 +514,18 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_live_toggled(self, button: Gtk.ToggleButton) -> None:
         if button.get_active():
             self._monitor.start(self._selected_scope())
-            self.refresh()
+            self._on_monitor_refresh(None)
         else:
             self._monitor.stop()
+            self._detail_refresh_pending = False
 
     def _on_scope_changed(self, *_args: object) -> None:
         self._journal.close()
         self._on_back_clicked()
+        self._store.remove_all()
+        self._on_selected_changed()
         scope = self._selected_scope()
         self._overview.set_activity(self._activity_feeds[scope].recent())
-        self._monitor.stop()
         if self._live_button.get_active():
             self._monitor.start(scope)
         self.refresh()
@@ -499,24 +550,33 @@ class MainWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("overview")
 
     def _on_logs_clicked(self, *_args: object) -> None:
-        if self._current_record is None:
+        record = self._current_record
+        if record is None:
             return
+        if self._detail_unit is not None:
+            record = replace(record, name=self._detail_unit.display_name)
         self._stack.set_visible_child_name("journal")
-        self._journal.open(self._current_record)
+        self._journal.open(record)
 
     def _on_journal_back(self) -> None:
         self._journal.close()
         self._stack.set_visible_child_name("inspector")
 
     def _on_window_close(self, *_args: object) -> bool:
+        self._closing = True
         self._monitor.stop()
         self._journal.close()
         self._journal.shutdown()
+        self._cancel_failure_preview()
+        self._failure_journal.shutdown()
+        self._current_record = None
+        self._request_id += 1
         return False
 
     def _on_back_clicked(self, *_args: object) -> None:
-        self._detail_request_id += 1
-        self._file_state_request_id += 1
+        self._inspector_session += 1
+        self._detail_refresh_pending = False
+        self._cancel_failure_preview()
         self._current_record = None
         self._detail_unit = None
         self._file_state = None
@@ -528,10 +588,21 @@ class MainWindow(Adw.ApplicationWindow):
             self._load_details(self._current_record)
 
     def _open_inspector(self, record: ServiceRecord) -> None:
+        if record.scope != self._selected_scope():
+            return
+        self._inspector_session += 1
+        self._detail_refresh_pending = False
+        self._cancel_failure_preview()
+        self._clear_detail_groups()
+        self._failure_panel.set_visible(False)
+        self._detail_notice.set_visible(False)
+        self._detail_checked.set_text("Checking service status…")
         self._current_record = record
         self._action_notice.set_visible(False)
-        self._detail_title.set_text(record.name)
+        self._detail_title.set_title(record.name)
+        self._detail_title.set_subtitle(f"{record.scope_label} service")
         self._stack.set_visible_child_name("inspector")
+        self._detail_back.grab_focus()
         self._load_details(record)
 
     def _eligible_actions(self) -> set[str]:
@@ -611,7 +682,7 @@ class MainWindow(Adw.ApplicationWindow):
         def current() -> bool:
             return (
                 request_id == self._file_state_request_id
-                and record == self._current_record
+                and record is self._current_record
             )
 
         def success(state: str) -> None:
@@ -650,8 +721,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         dialog = Adw.AlertDialog(
             heading=f"{action.capitalize()} {record.name}?",
-            body=file_action_message(action, record),
+            body=f"Manager: {record.scope_label}\n\n" + file_action_message(action, record),
         )
+        session = self._inspector_session
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("apply", action.capitalize())
         dialog.set_default_response("cancel")
@@ -678,7 +750,8 @@ class MainWindow(Adw.ApplicationWindow):
         def responded(_dialog: Adw.AlertDialog, response: str) -> None:
             if (
                 response == "apply"
-                and record == self._current_record
+                and session == self._inspector_session
+                and record.scope == self._selected_scope()
                 and self._file_state == state
                 and action in self._eligible_file_actions()
                 and not self._action_pending
@@ -703,7 +776,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def success(outcome: FileActionOutcome) -> None:
             self._action_pending = False
-            if record == self._current_record:
+            if record is self._current_record:
                 if outcome.verified:
                     notice = (
                         f"{action.capitalize()} verified: unit-file state is "
@@ -725,7 +798,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def error(message: str) -> None:
             self._action_pending = False
-            if record == self._current_record:
+            if record is self._current_record:
                 self._action_notice.set_text(
                     f"{action.capitalize()} was not verified: {message}"
                 )
@@ -749,8 +822,9 @@ class MainWindow(Adw.ApplicationWindow):
         heading = f"{action.capitalize()} {record.name}?"
         dialog = Adw.AlertDialog(
             heading=heading,
-            body=confirmation_text(action, record),
+            body=f"Manager: {record.scope_label}\n\n" + confirmation_text(action, record),
         )
+        session = self._inspector_session
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("proceed", action.capitalize())
         dialog.set_close_response("cancel")
@@ -761,7 +835,12 @@ class MainWindow(Adw.ApplicationWindow):
             )
 
         def responded(_dialog: Adw.AlertDialog, response: str) -> None:
-            if response == "proceed" and self._current_record == record:
+            if (
+                response == "proceed"
+                and session == self._inspector_session
+                and record.scope == self._selected_scope()
+                and action in self._eligible_actions()
+            ):
                 self._execute_action(action, record)
 
         dialog.connect("response", responded)
@@ -779,7 +858,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def completed(outcome: ActionOutcome) -> None:
             self._action_pending = False
-            if self._current_record == record:
+            if self._current_record is record:
                 if outcome.succeeded:
                     status = (
                         f"{action.capitalize()} job finished (done). "
@@ -797,7 +876,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def failed(message: str) -> None:
             self._action_pending = False
-            if self._current_record == record:
+            if self._current_record is record:
                 self._action_notice.set_text(
                     f"{action.capitalize()} was not confirmed: {message}"
                 )
@@ -816,14 +895,48 @@ class MainWindow(Adw.ApplicationWindow):
             self._detail_groups.remove(child)
             child = self._detail_groups.get_first_child()
 
+    def _cancel_failure_preview(self) -> None:
+        if self._failure_request is not None:
+            self._failure_request.cancel()
+            self._failure_request = None
+
+    def _update_failure_preview(self, record: ServiceRecord, details: ServiceDetails) -> None:
+        summary = details.failure_summary
+        was_visible = self._failure_panel.get_visible()
+        self._failure_panel.set_visible(summary is not None)
+        if summary is None:
+            self._cancel_failure_preview()
+            return
+        self._failure_summary.set_text(summary)
+        if not was_visible:
+            self._failure_logs.set_text("Reading recent errors from this boot…")
+        self._cancel_failure_preview()
+
+        def show_errors(entries: list[JournalEntry]) -> None:
+            if self._current_record is not record or self._detail_unit is not details:
+                return
+            self._failure_logs.set_text(
+                "\n".join(
+                    f"{entry.timestamp}  {entry.message[:320]}" for entry in reversed(entries)
+                ) if entries else "No readable error messages from this boot."
+            )
+
+        def unavailable(_message: str) -> None:
+            if self._current_record is record and self._detail_unit is details:
+                self._failure_logs.set_text("Could not read recent errors. Open Logs for details.")
+
+        self._failure_request = self._failure_journal.fetch(
+            record.scope, details.display_name, show_errors, unavailable,
+            limit=3, max_priority=3,
+        )
+
     def _load_details(self, record: ServiceRecord) -> None:
-        self._load_file_state(record)
         self._detail_request_id += 1
         request_id = self._detail_request_id
+        previous_details = self._detail_unit
         self._detail_unit = None
+        self._load_file_state(record)
         self._update_action_buttons()
-        self._clear_detail_groups()
-        self._detail_notice.set_visible(False)
         self._detail_refresh.set_sensitive(False)
         self._detail_spinner.set_visible(True)
         self._detail_spinner.start()
@@ -831,50 +944,69 @@ class MainWindow(Adw.ApplicationWindow):
         def current() -> bool:
             return (
                 request_id == self._detail_request_id
-                and self._current_record == record
+                and self._current_record is record
             )
 
         def finished() -> None:
             self._detail_spinner.stop()
             self._detail_spinner.set_visible(False)
             self._detail_refresh.set_sensitive(True)
+            if self._detail_refresh_pending:
+                self._detail_refresh_pending = False
+                self._load_details(record)
 
         def succeeded(details: ServiceDetails) -> None:
             if not current():
                 return
-            finished()
             self._detail_unit = details
             self._update_action_buttons()
-            self._detail_title.set_text(details.display_name)
+            self._detail_title.set_title(details.display_name)
+            self._detail_checked.set_text(f"Last checked at {datetime.now():%H:%M:%S}")
+            self._detail_notice.set_visible(bool(details.service_warning))
             if details.service_warning:
                 self._detail_notice.set_text(
                     "Some service-specific properties could not be read: "
                     + details.service_warning
                 )
-                self._detail_notice.set_visible(True)
-            for group_title, rows in details.sections():
-                group = Adw.PreferencesGroup()
-                for field_title, value in rows:
-                    row = Adw.ActionRow()
-                    row.set_title(field_title)
-                    row.set_use_markup(False)
-                    row.set_subtitle(value)
-                    row.set_subtitle_lines(
-                        2 if group_title == "Identity and state" else 4
+            self._update_failure_preview(record, details)
+            sections = details.sections()
+            if previous_details is None or previous_details.sections() != sections:
+                expanded = {}
+                child = self._detail_groups.get_first_child()
+                while child is not None:
+                    expanded[child.get_label()] = child.get_expanded()
+                    child = child.get_next_sibling()
+                self._clear_detail_groups()
+                for group_title, rows in sections:
+                    group = Adw.PreferencesGroup()
+                    for field_title, value in rows:
+                        row = Adw.ActionRow()
+                        row.set_title(field_title)
+                        row.set_use_markup(False)
+                        row.set_subtitle(value)
+                        row.set_subtitle_lines(
+                            2 if group_title == "Identity and state" else 4
+                        )
+                        row.set_subtitle_selectable(True)
+                        group.add(row)
+                    expander = Gtk.Expander(label=group_title)
+                    expander.set_expanded(
+                        expanded.get(group_title, group_title == "Identity and state")
                     )
-                    row.set_subtitle_selectable(True)
-                    group.add(row)
-                expander = Gtk.Expander(label=group_title)
-                expander.set_expanded(group_title == "Identity and state")
-                expander.set_child(group)
-                self._detail_groups.append(expander)
+                    expander.set_child(group)
+                    self._detail_groups.append(expander)
+            finished()
 
         def failed(message: str) -> None:
             if not current():
                 return
-            finished()
+            self._clear_detail_groups()
+            self._cancel_failure_preview()
+            self._failure_panel.set_visible(False)
+            self._detail_checked.set_text("Service status unavailable")
             self._detail_notice.set_text(message)
             self._detail_notice.set_visible(True)
+            finished()
 
         self._client.fetch_details(
             record.scope, record.name, succeeded, failed,
@@ -899,9 +1031,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._summary.set_text("  ·  ".join(parts))
 
     def refresh(self) -> None:
+        if self._closing:
+            return
         self._request_id += 1
         request_id = self._request_id
-        scope = "system" if self._scope.get_selected() == 0 else "user"
+        scope = self._selected_scope()
         self._overview.update(None, scope=scope)
         self._notice.set_visible(False)
         self._refresh.set_sensitive(False)

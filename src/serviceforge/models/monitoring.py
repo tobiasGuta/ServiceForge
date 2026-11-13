@@ -110,15 +110,18 @@ def should_refresh_for_signal(
         or not path.startswith("/org/freedesktop/systemd1/unit/")
         or len(values) != 3 or not isinstance(values[0], str)
         or not isinstance(values[1], dict)
+        or not isinstance(values[2], (list, tuple))
     ):
         return False
 
     monitored = {
         "org.freedesktop.systemd1.Unit": {
             "ActiveState", "SubState", "LoadState", "UnitFileState",
+            "CanStart", "CanStop", "CanReload",
         },
         "org.freedesktop.systemd1.Service": {
-            "Result", "MainPID", "ExecMainStatus",
+            "Result", "MainPID", "ExecMainCode", "ExecMainStatus", "NRestarts",
         },
     }
-    return bool(monitored.get(values[0], set()).intersection(values[1]))
+    properties = monitored.get(values[0], set())
+    return bool(properties.intersection(values[1]) or properties.intersection(values[2]))

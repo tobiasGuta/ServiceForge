@@ -13,6 +13,16 @@ MAX_MESSAGE_LENGTH = 8192
 
 
 @dataclass(frozen=True, slots=True)
+class JournalBoot:
+    boot_id: str
+    first_entry: datetime
+
+    @property
+    def label(self) -> str:
+        return f"{self.first_entry.astimezone():%Y-%m-%d %H:%M} · {self.boot_id[:8]}"
+
+
+@dataclass(frozen=True, slots=True)
 class JournalEntry:
     timestamp: str
     priority: int | None

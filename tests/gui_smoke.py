@@ -4,20 +4,25 @@ Run under Xvfb. This checks our new overview/journal widgets but cannot
 prove journal permissions, display styling, or D-Bus connectivity.
 """
 
+from concurrent.futures import Future
+from dataclasses import replace
+from datetime import datetime, timezone
+from unittest.mock import patch
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw  # noqa: E402
+from gi.repository import Adw, Gio  # noqa: E402
 
 from serviceforge.models.service import ServiceRecord
 from serviceforge.models.details import ServiceDetails
 from serviceforge.backend.systemd_client import SystemdClient
 from serviceforge.backend.live_monitor import LiveMonitor
 from serviceforge.models.monitoring import ActivityEvent
-from serviceforge.ui.main_window import MainWindow
-from unittest.mock import patch
+from serviceforge.models.journal import JournalBoot, JournalEntry
+from serviceforge.ui.main_window import MainWindow, ServiceItem
 from serviceforge.ui.overview_view import OverviewView
 from serviceforge.ui.journal_view import JournalView
 
@@ -54,7 +59,11 @@ def run() -> None:
     journal.shutdown()
 
     # Suppress the initial D-Bus request: CI has no running systemd manager.
-    app = Adw.Application(application_id="io.github.tobiasGuta.ServiceForge")
+    app = Adw.Application(
+        application_id="io.github.tobiasGuta.ServiceForge.Test",
+        flags=Gio.ApplicationFlags.NON_UNIQUE,
+    )
+    app.register(None)
     with patch.object(SystemdClient, "fetch_services", lambda *_: None), patch.object(
         LiveMonitor, "start", lambda *_: None
     ):
@@ -71,6 +80,15 @@ def run() -> None:
     assert window._activity_feeds["system"].recent() == (observed,)
     assert window._activity_feeds["user"].recent() == ()
     assert window._overview._events == (observed,)
+    window._store.append(ServiceItem(record))
+    assert window._inspect_button.get_sensitive()
+    with patch.object(SystemdClient, "fetch_services"), patch.object(LiveMonitor, "start"):
+        window._scope.set_selected(1)
+        assert window._store.get_n_items() == 0
+        assert not window._inspect_button.get_sensitive()
+        window._open_inspector(record)
+        assert window._current_record is None
+        window._scope.set_selected(0)
     window._current_record = record
     window._detail_unit = ServiceDetails(
         scope="system",
@@ -177,7 +195,42 @@ def run() -> None:
     assert first.get_expanded()
     second = first.get_next_sibling()
     assert not second.get_expanded()
-    window.destroy()
+    window._scope.set_selected(1)
+    window._current_record = file_record
+    with patch.object(window, "refresh"), patch.object(window, "_load_details") as reload:
+        window._on_monitor_refresh({"another.service"})
+        reload.assert_not_called()
+        window._on_monitor_refresh({file_record.name})
+        reload.assert_called_once_with(file_record)
+
+    failed_details = replace(
+        details,
+        unit={**details.unit, "ActiveState": "failed"},
+        service={"Result": "exit-code", "ExecMainCode": 1, "ExecMainStatus": 23, "NRestarts": 0},
+    )
+    with patch.object(window._failure_journal, "fetch", return_value=None):
+        window._update_failure_preview(file_record, failed_details)
+        assert window._failure_panel.get_visible()
+        assert "Exit status 23" in window._failure_summary.get_text()
+
+    boot = JournalBoot("a" * 32, datetime(2026, 11, 12, tzinfo=timezone.utc))
+    viewer = window._journal
+    with (
+        patch.object(viewer._client, "fetch_boots", return_value=Future()) as boot_list,
+        patch.object(viewer._client, "fetch", side_effect=lambda *_, **__: Future()) as history,
+    ):
+        viewer.open(file_record)
+        first_read = history.call_args
+        boot_list.call_args.args[0]([boot])
+        assert viewer._boot.get_sensitive()
+        viewer._boot.set_selected(1)
+        assert history.call_args.kwargs["boot_id"] == boot.boot_id
+        first_read.args[2]([JournalEntry("now", 3, "Stale current-boot entry")])
+        assert viewer._entries == []
+        previous = JournalEntry("earlier", 3, "Previous-boot entry")
+        history.call_args.args[2]([previous])
+        assert viewer._entries == [previous]
+    window.close()
     print("GTK overview, journal, Inspector and file controls constructed successfully")
 
 

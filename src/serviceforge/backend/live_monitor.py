@@ -25,7 +25,9 @@ REFRESH_DEBOUNCE_MS = 750
 RECONCILE_SECONDS = 90
 FALLBACK_SECONDS = 45
 
-RefreshCallback = Callable[[], None]
+# None requests reconciliation of every unit. Other refreshes carry the
+# affected unit names and object paths, alongside the explorer refresh.
+RefreshCallback = Callable[[set[str] | None], None]
 EventCallback = Callable[[ActivityEvent], None]
 StatusCallback = Callable[[str], None]
 
@@ -51,6 +53,7 @@ class LiveMonitor:
         self._closed_handler_id: int | None = None
         self._refresh_source: int | None = None
         self._reconcile_source: int | None = None
+        self._affected_units: set[str] | None = set()
 
     def start(self, scope: Scope) -> None:
         if scope not in ("system", "user"):
@@ -149,6 +152,7 @@ class LiveMonitor:
                 GLib.source_remove(source)
         self._refresh_source = None
         self._reconcile_source = None
+        self._affected_units = set()
         self._remove_subscriptions()
         self._on_status("Live monitoring paused · manual refresh available")
 
@@ -205,7 +209,7 @@ class LiveMonitor:
     def _periodic_reconcile(self, generation: int) -> bool:
         if not self._is_current(generation):
             return GLib.SOURCE_REMOVE
-        self._on_refresh()
+        self._on_refresh(None)
         return GLib.SOURCE_CONTINUE
 
     def _signal_received(
@@ -230,6 +234,14 @@ class LiveMonitor:
             )
             if event is not None:
                 self._on_event(event)
+                if event.unit is None:
+                    self._affected_units = None
+                elif signal == "JobRemoved" and self._affected_units is not None:
+                    self._affected_units.add(event.unit)
+                # A detail read may load a unit and trigger UnitNew/UnitRemoved.
+                # These signals refresh the explorer only.
+        elif self._affected_units is not None:
+            self._affected_units.add(path)
         self._schedule_refresh(generation)
 
     def _schedule_refresh(self, generation: int) -> None:
@@ -239,7 +251,9 @@ class LiveMonitor:
         def finished() -> bool:
             self._refresh_source = None
             if self._is_current(generation):
-                self._on_refresh()
+                affected = self._affected_units
+                self._affected_units = set()
+                self._on_refresh(affected)
             return GLib.SOURCE_REMOVE
 
         self._refresh_source = GLib.timeout_add(

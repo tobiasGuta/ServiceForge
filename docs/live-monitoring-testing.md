@@ -47,6 +47,9 @@ systemctl --user daemon-reload
    With Live monitoring available, the row should update to
    `active / running` automatically after a brief debounce. If the footer
    says Polling, updates may take up to 45 seconds.
+   Open the Inspector and repeat a stop and start from the terminal. Check
+   that the running state, current PID, available actions, and last-checked
+   time update while the Inspector is open.
 4. Click **Overview**. You should see recent events such as a systemd
    job finishing and a unit being loaded. These are live observations,
    **not** historical journal messages.
@@ -66,7 +69,7 @@ systemctl --user daemon-reload
    user manager and resumes responding to service events.
 8. Switch between **System services** and **User services**; activity
    histories should remain scoped and must not show user units under the
-   system manager.
+   system manager. The previous list should clear while the new scope loads.
 
 If the footer shows a D-Bus subscription problem, share its **error text**
 but do not loosen permissions or run the GUI with sudo. The 45-second

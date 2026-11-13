@@ -22,7 +22,7 @@ Both use `org.freedesktop.systemd1` and `/org/freedesktop/systemd1`.
 
 The MVP calls `ListUnits` and `ListUnitFiles`. The first returns loaded units; the second returns unit-file paths and enablement states. The UI intentionally does not combine runtime state with startup configuration.
 
-Some loaded instances, aliases, generated units, and transient units may not have an exact basename match in `ListUnitFiles`. Their startup state is shown as **Unknown** rather than guessed. A later iteration should reconcile file entries more precisely and support installed-but-unloaded unit discovery.
+Some loaded instances, aliases, generated units, and transient units may not have an exact basename match in `ListUnitFiles`. Their startup state is shown as **Unknown**. Concrete installed-but-unloaded services appear in the explorer with an unknown runtime state.
 
 ## Future boundaries
 
@@ -58,13 +58,11 @@ snapshot as the service table, including pending/failed/error states.
 ## Journal reader
 
 `backend.journal_reader.read_journal()` uses `python3-systemd`'s native Reader,
-matching `_SYSTEMD_UNIT` for system services and `_SYSTEMD_USER_UNIT` plus
-`_UID` for the logged-in user's services. It limits results to 200 entries
-from the current boot, and reads backwards from the journal tail before
-reversing for display. Some related unit-manager messages may not have these
-fields, so this is not intended to exactly reproduce every `journalctl -u`
-match. Some service messages are inaccessible under ordinary-user journal
-permissions.
+matching service output and selected manager lifecycle messages. It applies
+the selected boot ID across all match branches. Logs reads up to 200 entries
+from the selected boot and shows them in chronological order. The Inspector
+reads up to three error-level or more severe entries from the current boot
+for a failed service. Journal access follows the user's existing permissions.
 
 The journal operation runs through a single-worker thread executor. Callbacks
 are delivered via `GLib.idle_add`, and generation counters prevent stale
@@ -143,8 +141,10 @@ are closed when monitoring is paused, the scope changes, or the app closes.
 
 The monitor subscribes to Manager.UnitNew/UnitRemoved/JobRemoved/
 UnitFilesChanged/Reloading and selected Unit/Service PropertiesChanged
-notifications. Each event triggers a debounced full snapshot read (750 ms),
-never writes to systemd. A periodic 90-second reconciliation compensates for
+notifications. Events trigger a debounced explorer snapshot read (750 ms).
+Job and property events also refresh a matching open Inspector. Reload,
+unit-file changes, and periodic reconciliation refresh the open Inspector
+for the selected manager. A periodic 90-second reconciliation compensates for
 missed notifications and disk changes. If subscription fails, the monitor
 falls back to a 45-second snapshot polling interval and tells the user why.
 

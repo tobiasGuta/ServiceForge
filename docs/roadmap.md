@@ -21,7 +21,8 @@
 - [x] Installed-but-unloaded service discovery and inspection
 - [x] Private D-Bus monitor with debounced events, 90s reconciliation and 45s fallback
 - [x] In-session, bounded Overview activity feed
-- [ ] Manually verify live monitoring, fallback state and pause/scope switching on Fedora GNOME
+- [x] Verify live updates, pause/resume, scope switching, and job completion on Fedora 45 with a disposable user service
+- [x] Cover unavailable subscriptions and polling fallback in smoke tests
 - [ ] D-Bus error/permission integration tests
 
 ## Phase 3: Service management (experimental)
@@ -42,7 +43,9 @@
 ## Phase 4: Diagnostics (begun early, read-only)
 
 - [x] Loaded-service Overview with failure navigation
-- [x] Bounded current-boot journal history per selected service
+- [x] Inspector failure summary with recent errors and live service status
+- [x] Bounded journal history for the current and retained previous boots
+- [x] Native journal matching regression across two boots
 - [x] Local severity filtering, text search and explicit copy action
 - [x] Journal reader pure-Python tests using a fake Reader
 - [x] Expand journal matches with selected manager lifecycle entries
@@ -53,7 +56,6 @@
 
 ## Phase 5: Release engineering
 
-- Full Fedora test matrix, CI improvements, accessibility
-- Complete contributor and security documentation
-- Finalize license and add LICENSE
-- Desktop metadata, icons, RPM/COPR evaluation
+- [x] GPL-3.0-or-later license
+- [x] Fedora 44/45 RPM builds and GNOME launcher
+- [ ] Accessibility pass and contributor documentation
