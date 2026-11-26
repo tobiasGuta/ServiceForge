@@ -30,7 +30,7 @@ jobs:
       image: fedora:${{ matrix.fedora }}
     steps:
       - name: Install native Fedora dependencies
-        run: dnf install -y git rpm-build python3-devel pyproject-rpm-macros python3-setuptools python3-wheel desktop-file-utils python3-gobject gtk4 libadwaita python3-systemd systemd-journal-remote xorg-x11-server-Xvfb
+        run: dnf install -y git rpm-build python3-devel pyproject-rpm-macros python3-setuptools python3-wheel desktop-file-utils python3-gobject gtk4 libadwaita libdbusmenu python3-systemd systemd-journal-remote xorg-x11-server-Xvfb
       - uses: actions/checkout@v4
       - name: Import GTK application and journal backend
         run: |

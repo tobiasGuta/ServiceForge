@@ -30,6 +30,7 @@ class ServiceForgeApplication(Adw.Application):
         self._settings: Settings = load_settings()
         self._tray: ServiceForgeTray | None = None
         self._window: MainWindow | None = None
+        self._holding = False
 
         self.connect("startup", self._on_startup)
 
@@ -82,10 +83,19 @@ class ServiceForgeApplication(Adw.Application):
                 on_quit=self.quit_app,
                 on_toggle_live=self._on_tray_toggle_live,
             )
-            if self._tray.is_available:
-                self.hold()
+            self._sync_hold()
         except Exception:
             self._tray = None
+            self._sync_hold()
+
+    def _sync_hold(self) -> None:
+        should_hold = self.tray_available and self._settings.minimize_to_tray
+        if should_hold and not self._holding:
+            self.hold()
+            self._holding = True
+        elif not should_hold and self._holding:
+            self.release()
+            self._holding = False
 
     def _on_tray_toggle_live(self, active: bool) -> None:
         if self._window is not None:
@@ -122,6 +132,7 @@ class ServiceForgeApplication(Adw.Application):
 
     def _on_settings_changed(self, new_settings: Settings) -> None:
         self._settings = new_settings
+        self._sync_hold()
 
     def _show_about(self, *_args: object) -> None:
         dialog = Adw.AboutDialog(
@@ -146,12 +157,23 @@ class ServiceForgeApplication(Adw.Application):
     def _on_quit_action(self, *_args: object) -> None:
         self.quit_app()
 
-    def quit_app(self) -> None:
-        if self._window is not None:
-            self._window.force_close()
+    def on_window_closed(self) -> None:
+        self._window = None
         if self._tray is not None:
             self._tray.destroy()
             self._tray = None
+        self._sync_hold()
+        self.quit()
+
+    def quit_app(self) -> None:
+        if self._window is not None:
+            window = self._window
+            self._window = None
+            window.force_close()
+        if self._tray is not None:
+            self._tray.destroy()
+            self._tray = None
+        self._sync_hold()
         self.quit()
 
     def do_activate(self) -> None:

@@ -84,15 +84,35 @@ def run() -> None:
     assert window._inspect_button.get_sensitive()
 
     # Same-scope background refresh preserves Overview counts instead of flashing "—".
+    notifications = []
+    app.notify_failure = lambda unit, msg: notifications.append((unit, msg))
     with patch.object(
         window._client, "fetch_services",
         side_effect=lambda _scope, success, _error: success([record], None),
     ):
         window.refresh()
     assert window._overview._numbers["total"].get_text() == "1"
+    # Initial snapshot does not spam notifications for already-failed services.
+    assert notifications == []
     with patch.object(window._client, "fetch_services"):
         window.refresh()
     assert window._overview._numbers["total"].get_text() == "1"
+
+    # Recovery then subsequent crash without a JobRemoved signal notifies once.
+    recovered = replace(record, active_state="active", sub_state="running")
+    with patch.object(
+        window._client, "fetch_services",
+        side_effect=lambda _scope, success, _error: success([recovered], None),
+    ):
+        window.refresh()
+    with patch.object(
+        window._client, "fetch_services",
+        side_effect=lambda _scope, success, _error: success([record], None),
+    ):
+        window.refresh()
+    assert len(notifications) == 1
+    assert notifications[0][0] == record.name
+    assert window._activity_feeds["system"].recent()[0].title == "Service failed"
 
     with patch.object(SystemdClient, "fetch_services"), patch.object(LiveMonitor, "start"):
         window._scope.set_selected(1)
@@ -203,6 +223,24 @@ def run() -> None:
     assert window._file_buttons["mask"].get_sensitive()
     assert not window._file_buttons["disable"].get_sensitive()
     assert not window._file_buttons["unmask"].get_sensitive()
+
+    # Same-unit live refresh keeps Inspector action/file buttons sensitive while fetching.
+    pending_details = []
+    pending_file_state = []
+    with patch.object(
+        window._client, "fetch_details",
+        side_effect=lambda _s, _n, success, _e, **_kw: pending_details.append(success),
+    ), patch.object(
+        window._file_client, "get_state",
+        side_effect=lambda _s, _n, success, _e: pending_file_state.append(success),
+    ):
+        window._load_details(file_record)
+    assert window._action_buttons["start"].get_sensitive()
+    assert window._file_buttons["enable"].get_sensitive()
+    assert window._file_buttons["mask"].get_sensitive()
+    pending_file_state[0]("disabled")
+    pending_details[0](details)
+    assert window._detail_refresh.get_sensitive()
 
     first = window._detail_groups.get_first_child()
     assert first.get_expanded()

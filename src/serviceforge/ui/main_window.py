@@ -3,6 +3,7 @@
 from concurrent.futures import Future
 from dataclasses import replace
 from datetime import datetime
+from time import monotonic
 
 import gi
 
@@ -36,6 +37,7 @@ FILTER_OPTIONS = (
     "All services", "Loaded", "Unloaded", "Active", "Inactive",
     "Failed", "Enabled", "Masked",
 )
+FAILURE_NOTIFY_COOLDOWN_SECONDS = 10.0
 
 
 class ServiceItem(GObject.Object):
@@ -76,6 +78,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._closing = False
         self._force_close = False
         self._store = Gio.ListStore.new(ServiceItem)
+        self._known_failed_by_scope: dict[Scope, set[str]] = {}
+        self._recent_failure_notified: dict[tuple[Scope, str], float] = {}
         self._activity_feeds = {
             "system": ActivityFeed(), "user": ActivityFeed(),
         }
@@ -507,18 +511,63 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._load_details(record)
 
-    def _on_monitor_activity(self, event: ActivityEvent) -> None:
+    def _record_activity_event(self, event: ActivityEvent) -> None:
         self._activity_feeds[event.scope].add(event)
         if event.scope == self._selected_scope():
             self._overview.set_activity(
                 self._activity_feeds[event.scope].recent(),
             )
-        if "failed" in event.detail.lower() or "failed" in event.title.lower():
-            app = self.get_application()
-            if hasattr(app, "notify_failure"):
-                app.notify_failure(
-                    event.unit or "Service", f"{event.title}: {event.detail}"
+
+    def _notify_failure(self, scope: Scope, unit: str, message: str) -> bool:
+        now = monotonic()
+        key = (scope, unit)
+        last = self._recent_failure_notified.get(key)
+        if last is not None and now - last < FAILURE_NOTIFY_COOLDOWN_SECONDS:
+            return False
+        self._recent_failure_notified[key] = now
+        app = self.get_application()
+        if hasattr(app, "notify_failure"):
+            app.notify_failure(unit, message)
+        return True
+
+    def _record_snapshot_failures(
+        self, scope: Scope, records: list[ServiceRecord],
+    ) -> None:
+        current_failed = {
+            record.name for record in records if record.active_state == "failed"
+        }
+        previous_failed = self._known_failed_by_scope.get(scope)
+        self._known_failed_by_scope[scope] = current_failed
+        if previous_failed is None:
+            return
+        for recovered in previous_failed - current_failed:
+            self._recent_failure_notified.pop((scope, recovered), None)
+        newly_failed = sorted(current_failed - previous_failed)
+        if not newly_failed:
+            return
+        now_wall = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        for unit_name in newly_failed:
+            if self._notify_failure(
+                scope, unit_name, "Service entered failed state.",
+            ):
+                self._record_activity_event(
+                    ActivityEvent(
+                        scope,
+                        now_wall,
+                        "Service failed",
+                        "ActiveState transitioned to failed",
+                        unit_name,
+                    )
                 )
+
+    def _on_monitor_activity(self, event: ActivityEvent) -> None:
+        self._record_activity_event(event)
+        if "failed" in event.detail.lower() or "failed" in event.title.lower():
+            self._notify_failure(
+                event.scope,
+                event.unit or "Service",
+                f"{event.title}: {event.detail}",
+            )
 
     def _on_monitor_status(self, message: str) -> None:
         self._monitor_status.set_text(message)
@@ -604,6 +653,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._failure_journal.shutdown()
         self._current_record = None
         self._request_id += 1
+        if not self._force_close and hasattr(app, "on_window_closed"):
+            app.on_window_closed()
         return False
 
     def _on_back_clicked(self, *_args: object) -> None:
@@ -631,6 +682,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_notice.set_visible(False)
         self._detail_checked.set_text("Checking service status…")
         self._current_record = record
+        self._detail_unit = None
+        self._file_state = None
         self._action_notice.set_visible(False)
         self._detail_title.set_title(record.name)
         self._detail_title.set_subtitle(f"{record.scope_label} service")
@@ -699,10 +752,13 @@ class MainWindow(Adw.ApplicationWindow):
                 action in file_available and not self._action_pending
             )
 
-    def _load_file_state(self, record: ServiceRecord) -> None:
+    def _load_file_state(
+        self, record: ServiceRecord, *, preserve_state: bool = False,
+    ) -> None:
         self._file_state_request_id += 1
         request_id = self._file_state_request_id
-        self._file_state = None
+        if not preserve_state or not record.unit_file_path:
+            self._file_state = None
         self._update_action_buttons()
         if not record.unit_file_path:
             self._file_status.set_text(
@@ -710,7 +766,8 @@ class MainWindow(Adw.ApplicationWindow):
                 "Persistent actions are unavailable."
             )
             return
-        self._file_status.set_text("Checking current unit-file state…")
+        if self._file_state is None:
+            self._file_status.set_text("Checking current unit-file state…")
 
         def current() -> bool:
             return (
@@ -731,6 +788,7 @@ class MainWindow(Adw.ApplicationWindow):
         def failure(message: str) -> None:
             if not current():
                 return
+            self._file_state = None
             self._file_status.set_text(
                 "Cannot verify unit-file configuration. "
                 "Changes are disabled. " + message
@@ -967,8 +1025,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._detail_request_id += 1
         request_id = self._detail_request_id
         previous_details = self._detail_unit
-        self._detail_unit = None
-        self._load_file_state(record)
+        same_unit = (
+            previous_details is not None
+            and previous_details.scope == record.scope
+            and previous_details.requested_name == record.name
+        )
+        if not same_unit:
+            self._detail_unit = None
+        self._load_file_state(record, preserve_state=same_unit)
         self._update_action_buttons()
         self._detail_refresh.set_sensitive(False)
         self._detail_spinner.set_visible(True)
@@ -1033,6 +1097,8 @@ class MainWindow(Adw.ApplicationWindow):
         def failed(message: str) -> None:
             if not current():
                 return
+            self._detail_unit = None
+            self._update_action_buttons()
             self._clear_detail_groups()
             self._cancel_failure_preview()
             self._failure_panel.set_visible(False)
@@ -1088,6 +1154,7 @@ class MainWindow(Adw.ApplicationWindow):
             if request_id != self._request_id:
                 return
             self._loaded_scope = scope
+            self._record_snapshot_failures(scope, records)
             # One model notification rather than hundreds of append events
             # during automatic refresh, preserving GTK responsiveness.
             self._store.splice(

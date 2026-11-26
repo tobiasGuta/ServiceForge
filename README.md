@@ -44,7 +44,7 @@ The Inspector uses `GetUnit` for loaded-only units and `LoadUnit` for known inst
 ## Run from source on Fedora
 
 ```bash
-sudo dnf install git python3 python3-gobject gtk4 libadwaita python3-systemd
+sudo dnf install git python3 python3-gobject gtk4 libadwaita libdbusmenu python3-systemd
 git clone https://github.com/tobiasGuta/ServiceForge.git
 cd ServiceForge
 PYTHONPATH=src python3 -m serviceforge
