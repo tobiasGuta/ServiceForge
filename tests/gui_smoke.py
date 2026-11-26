@@ -82,8 +82,21 @@ def run() -> None:
     assert window._overview._events == (observed,)
     window._store.append(ServiceItem(record))
     assert window._inspect_button.get_sensitive()
+
+    # Same-scope background refresh preserves Overview counts instead of flashing "—".
+    with patch.object(
+        window._client, "fetch_services",
+        side_effect=lambda _scope, success, _error: success([record], None),
+    ):
+        window.refresh()
+    assert window._overview._numbers["total"].get_text() == "1"
+    with patch.object(window._client, "fetch_services"):
+        window.refresh()
+    assert window._overview._numbers["total"].get_text() == "1"
+
     with patch.object(SystemdClient, "fetch_services"), patch.object(LiveMonitor, "start"):
         window._scope.set_selected(1)
+        assert window._overview._numbers["total"].get_text() == "—"
         assert window._store.get_n_items() == 0
         assert not window._inspect_button.get_sensitive()
         window._open_inspector(record)

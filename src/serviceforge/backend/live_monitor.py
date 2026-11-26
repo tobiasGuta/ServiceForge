@@ -32,6 +32,19 @@ EventCallback = Callable[[ActivityEvent], None]
 StatusCallback = Callable[[str], None]
 
 
+def _has_net_lifecycle_change(signals: list[str]) -> bool:
+    """Return False only for matched UnitNew -> UnitRemoved transient pairs."""
+    depth = 0
+    for sig in signals:
+        if sig == "UnitNew":
+            depth += 1
+        elif sig == "UnitRemoved":
+            if depth == 0:
+                return True
+            depth -= 1
+    return depth != 0
+
+
 class LiveMonitor:
     """Observe one selected manager at a time, on the GTK/GLib main context."""
 
@@ -54,6 +67,8 @@ class LiveMonitor:
         self._refresh_source: int | None = None
         self._reconcile_source: int | None = None
         self._affected_units: set[str] | None = set()
+        self._refresh_needed = False
+        self._unit_lifecycle: dict[str, list[str]] = {}
 
     def start(self, scope: Scope) -> None:
         if scope not in ("system", "user"):
@@ -153,6 +168,8 @@ class LiveMonitor:
         self._refresh_source = None
         self._reconcile_source = None
         self._affected_units = set()
+        self._refresh_needed = False
+        self._unit_lifecycle.clear()
         self._remove_subscriptions()
         self._on_status("Live monitoring paused · manual refresh available")
 
@@ -236,12 +253,19 @@ class LiveMonitor:
                 self._on_event(event)
                 if event.unit is None:
                     self._affected_units = None
-                elif signal == "JobRemoved" and self._affected_units is not None:
-                    self._affected_units.add(event.unit)
+                    self._refresh_needed = True
+                elif signal == "JobRemoved":
+                    if self._affected_units is not None:
+                        self._affected_units.add(event.unit)
+                    self._refresh_needed = True
+                elif signal in ("UnitNew", "UnitRemoved"):
+                    self._unit_lifecycle.setdefault(event.unit, []).append(signal)
                 # A detail read may load a unit and trigger UnitNew/UnitRemoved.
                 # These signals refresh the explorer only.
-        elif self._affected_units is not None:
-            self._affected_units.add(path)
+        else:
+            if self._affected_units is not None:
+                self._affected_units.add(path)
+            self._refresh_needed = True
         self._schedule_refresh(generation)
 
     def _schedule_refresh(self, generation: int) -> None:
@@ -252,8 +276,15 @@ class LiveMonitor:
             self._refresh_source = None
             if self._is_current(generation):
                 affected = self._affected_units
+                needs_refresh = self._refresh_needed or any(
+                    _has_net_lifecycle_change(signals)
+                    for signals in self._unit_lifecycle.values()
+                )
                 self._affected_units = set()
-                self._on_refresh(affected)
+                self._refresh_needed = False
+                self._unit_lifecycle.clear()
+                if needs_refresh:
+                    self._on_refresh(affected)
             return GLib.SOURCE_REMOVE
 
         self._refresh_source = GLib.timeout_add(

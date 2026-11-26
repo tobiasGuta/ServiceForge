@@ -160,6 +160,28 @@ def exercise_monitor():
         timers.fire(next(ident for ident, item in timers.scheduled.items() if item[0] == 750))
         assert refreshes[-1] is None
 
+        # Matched UnitNew + UnitRemoved in one burst is a transient probe and
+        # must not trigger a redundant full snapshot refresh.
+        connection.emit(
+            MANAGER, "UnitNew", PATH,
+            GLib.Variant("(so)", ("probe.service", UNIT_PATH)),
+        )
+        connection.emit(
+            MANAGER, "UnitRemoved", PATH,
+            GLib.Variant("(so)", ("probe.service", UNIT_PATH)),
+        )
+        timers.fire(next(ident for ident, item in timers.scheduled.items() if item[0] == 750))
+        assert len(refreshes) == 2
+
+        # A standalone UnitNew (unit remains loaded) still refreshes.
+        connection.emit(
+            MANAGER, "UnitNew", PATH,
+            GLib.Variant("(so)", ("loaded.service", UNIT_PATH)),
+        )
+        timers.fire(next(ident for ident, item in timers.scheduled.items() if item[0] == 750))
+        assert len(refreshes) == 3
+        assert refreshes[-1] == set()
+
         # Ignore timer units and manager reload beginning.
         connection.emit(
             MANAGER, "UnitNew", PATH,
@@ -168,7 +190,7 @@ def exercise_monitor():
         connection.emit(
             MANAGER, "Reloading", PATH, GLib.Variant("(b)", (True,)),
         )
-        assert len(events) == 2
+        assert len(events) == 5
         # Periodic reconciliation should be very slow, never a busy loop.
         scheduled_periodic = [
             ident for ident, item in timers.scheduled.items()
@@ -187,8 +209,8 @@ def exercise_monitor():
             connection, "org.freedesktop.systemd1", PATH, MANAGER,
             "UnitFilesChanged", GLib.Variant("()", ()), None,
         )
-        assert len(events) == 2  # no callbacks after Stop
-        assert len(refreshes) == 2
+        assert len(events) == 5  # no callbacks after Stop
+        assert len(refreshes) == 3
 
 
 def exercise_subscription_failure():

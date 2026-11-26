@@ -16,6 +16,7 @@ Requires:       python3-gobject
 Requires:       python3-systemd
 Requires:       gtk4
 Requires:       libadwaita
+Requires:       libdbusmenu
 Requires:       systemd
 
 %description
@@ -35,6 +36,10 @@ services, following systemd activity, and reading the journal.
 %pyproject_install
 %pyproject_save_files -l serviceforge
 desktop-file-install --dir=%{buildroot}%{_datadir}/applications packaging/io.github.tobiasGuta.ServiceForge.desktop
+install -D -p -m 0644 data/icons/hicolor/scalable/apps/io.github.tobiasGuta.ServiceForge.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.tobiasGuta.ServiceForge.svg
+install -D -p -m 0644 data/icons/hicolor/symbolic/apps/io.github.tobiasGuta.ServiceForge-symbolic.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/symbolic/apps/io.github.tobiasGuta.ServiceForge-symbolic.svg
 
 %check
 %{python3} -m unittest discover -s tests
@@ -44,6 +49,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.tobiasGuta.
 %doc README.md
 %{_bindir}/serviceforge
 %{_datadir}/applications/io.github.tobiasGuta.ServiceForge.desktop
+%{_datadir}/icons/hicolor/scalable/apps/io.github.tobiasGuta.ServiceForge.svg
+%{_datadir}/icons/hicolor/symbolic/apps/io.github.tobiasGuta.ServiceForge-symbolic.svg
 
 %changelog
 * Fri Nov 13 2026 ServiceForge contributors - 0.1.0-1

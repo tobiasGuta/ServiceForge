@@ -68,11 +68,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._action_buttons: dict[str, Gtk.Button] = {}
         self._file_buttons: dict[str, Gtk.Button] = {}
         self._request_id = 0
+        self._loaded_scope: Scope | None = None
         self._detail_request_id = 0
         self._inspector_session = 0
         self._detail_refresh_pending = False
         self._current_record: ServiceRecord | None = None
         self._closing = False
+        self._force_close = False
         self._store = Gio.ListStore.new(ServiceItem)
         self._activity_feeds = {
             "system": ActivityFeed(), "user": ActivityFeed(),
@@ -111,9 +113,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._live_button.connect("toggled", self._on_live_toggled)
         self._logs_button.connect("clicked", self._on_logs_clicked)
         self.connect("close-request", self._on_window_close)
+        default_scope = getattr(application, "default_scope", "system")
+        if default_scope == "user":
+            self._scope.set_selected(1)
         self._on_selected_changed()
         self.refresh()
-        self._monitor.start("system")
+        self._monitor.start(default_scope)
 
     def _create_explorer(self) -> Adw.ToolbarView:
         toolbar = Adw.ToolbarView()
@@ -143,7 +148,9 @@ class MainWindow(Adw.ApplicationWindow):
         )
         header.pack_end(self._live_button)
         menu = Gio.Menu()
+        menu.append("Preferences", "app.preferences")
         menu.append("About ServiceForge", "app.about")
+        menu.append("Quit", "app.quit")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         menu_button.set_tooltip_text("Main menu")
         header.pack_end(menu_button)
@@ -506,6 +513,12 @@ class MainWindow(Adw.ApplicationWindow):
             self._overview.set_activity(
                 self._activity_feeds[event.scope].recent(),
             )
+        if "failed" in event.detail.lower() or "failed" in event.title.lower():
+            app = self.get_application()
+            if hasattr(app, "notify_failure"):
+                app.notify_failure(
+                    event.unit or "Service", f"{event.title}: {event.detail}"
+                )
 
     def _on_monitor_status(self, message: str) -> None:
         self._monitor_status.set_text(message)
@@ -518,10 +531,18 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self._monitor.stop()
             self._detail_refresh_pending = False
+        app = self.get_application()
+        if hasattr(app, "set_tray_live_active"):
+            app.set_tray_live_active(button.get_active())
+
+    def toggle_live_monitoring(self, active: bool) -> None:
+        if self._live_button.get_active() != active:
+            self._live_button.set_active(active)
 
     def _on_scope_changed(self, *_args: object) -> None:
         self._journal.close()
         self._on_back_clicked()
+        self._loaded_scope = None
         self._store.remove_all()
         self._on_selected_changed()
         scope = self._selected_scope()
@@ -562,7 +583,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._journal.close()
         self._stack.set_visible_child_name("inspector")
 
+    def force_close(self) -> None:
+        self._force_close = True
+        self.close()
+
     def _on_window_close(self, *_args: object) -> bool:
+        app = self.get_application()
+        minimize_to_tray = getattr(app, "minimize_to_tray", True)
+        tray_available = getattr(app, "tray_available", False)
+
+        if not self._force_close and minimize_to_tray and tray_available:
+            self.set_visible(False)
+            return True
+
         self._closing = True
         self._monitor.stop()
         self._journal.close()
@@ -1030,22 +1063,31 @@ class MainWindow(Adw.ApplicationWindow):
             parts.append(f"{snapshot.other} other")
         self._summary.set_text("  ·  ".join(parts))
 
+        app = self.get_application()
+        if hasattr(app, "update_tray_status"):
+            app.update_tray_status(
+                failed_count=snapshot.failed,
+                total_count=snapshot.total,
+                scope=self._selected_scope(),
+            )
+
     def refresh(self) -> None:
         if self._closing:
             return
         self._request_id += 1
         request_id = self._request_id
         scope = self._selected_scope()
-        self._overview.update(None, scope=scope)
-        self._notice.set_visible(False)
+        if self._loaded_scope != scope:
+            self._overview.update(None, scope=scope)
+            self._summary.set_text(f"Loading {scope} services…")
         self._refresh.set_sensitive(False)
         self._spinner.set_visible(True)
         self._spinner.start()
-        self._summary.set_text(f"Loading {scope} services…")
 
         def succeeded(records: list[ServiceRecord], warning: str | None) -> None:
             if request_id != self._request_id:
                 return
+            self._loaded_scope = scope
             # One model notification rather than hundreds of append events
             # during automatic refresh, preserving GTK responsiveness.
             self._store.splice(
@@ -1060,11 +1102,14 @@ class MainWindow(Adw.ApplicationWindow):
                     + warning
                 )
                 self._notice.set_visible(True)
+            else:
+                self._notice.set_visible(False)
             self._update_summary()
 
         def failed(message: str) -> None:
             if request_id != self._request_id:
                 return
+            self._loaded_scope = None
             self._store.remove_all()
             self._overview.show_error(message, scope=scope)
             self._set_idle()
